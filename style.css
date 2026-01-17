@@ -1,0 +1,6 @@
+
+body{font-family:sans-serif;background:#0f2;color:#143}
+.top{display:flex;justify-content:space-between;padding:10px;background:#d4af37}
+.card{background:#e8ffd8;padding:20px;margin:10px;border-radius:12px}
+.bubble{animation:b 1s infinite alternate}
+@keyframes b{from{transform:translateY(0)}to{transform:translateY(-6px)}}
