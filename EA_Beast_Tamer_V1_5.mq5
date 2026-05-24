@@ -387,7 +387,7 @@ void OnTick() {
    double daily_p_usc = GetDailyProfitUSC();
    if(Inp_Use_Daily_Lock && daily_p_usc >= Inp_Daily_Target_USC) {
       if(!g_target_reached_today) {
-         if(Inp_Close_And_Stop) { CloseAll(); g_auto_mode = false; }
+         if(Inp_Close_And_Stop) { CloseAllProfitOnly(); g_auto_mode = false; }
          g_target_reached_today = true;
          Alert("เป้าแตก! กำไรวันนี้ครบ "+(string)Inp_Daily_Target_USC+" USC แล้วนาย");
          ShowBigMessage("🎯 ถึงเป้าหมายแล้ว!", clrLime);
@@ -471,26 +471,26 @@ void OnTick() {
    // --- [เพิ่มระบบแทรก: Quick Scalp & Clear Winner Side] ---
    if(Inp_Quick_Scalp && !is_processing) {
       if(b_t == 1 && s_t == 0 && b_p_thb >= Inp_Min_Profit_THB) {
-         CloseSide(POSITION_TYPE_BUY); last_basket_close = TimeCurrent(); return; 
+         CloseSideProfitOnly(POSITION_TYPE_BUY); last_basket_close = TimeCurrent(); return; 
       }
       if(s_t == 1 && b_t == 0 && s_p_thb >= Inp_Min_Profit_THB) {
-         CloseSide(POSITION_TYPE_SELL); last_basket_close = TimeCurrent(); return; 
+         CloseSideProfitOnly(POSITION_TYPE_SELL); last_basket_close = TimeCurrent(); return; 
       }
    }
 
    if(Inp_Close_All_When_Green && !is_processing) {
       if(b_t > 0 && s_t > 0 && b_p_thb >= Inp_Close_All_Min_Profit_THB && s_p_thb >= Inp_Close_All_Min_Profit_THB) {
-         CloseAll(); last_basket_close = TimeCurrent(); return;
+         CloseAllProfitOnly(); last_basket_close = TimeCurrent(); return;
       }
    }
 
    if(Inp_Clear_Winner_Side && !is_processing) {
       if(b_t > 0 && b_p_thb >= Inp_Min_Profit_THB) {
-         if(Inp_Nuke_Board && total_thb >= 0) CloseAll(); else CloseSide(POSITION_TYPE_BUY); 
+         if(Inp_Nuke_Board && total_thb >= 0) CloseAllProfitOnly(); else CloseSideProfitOnly(POSITION_TYPE_BUY); 
          last_basket_close = TimeCurrent(); return; 
       }
       if(s_t > 0 && s_p_thb >= Inp_Min_Profit_THB) {
-         if(Inp_Nuke_Board && total_thb >= 0) CloseAll(); else CloseSide(POSITION_TYPE_SELL); 
+         if(Inp_Nuke_Board && total_thb >= 0) CloseAllProfitOnly(); else CloseSideProfitOnly(POSITION_TYPE_SELL); 
          last_basket_close = TimeCurrent(); return; 
       }
    }
@@ -524,11 +524,11 @@ void OnTick() {
    if(Inp_Use_AI_Exit && total_thb > (Inp_Target_THB * 0.5) && velocity < 5.0 && (b_t > 0 || s_t > 0)) {
       // ปิดเฉพาะเมื่อไม่มีฝั่งไหนขาดทุนหนัก (กัน cut loss)
       if(b_p_thb >= 0 && s_p_thb >= 0) {
-         CloseAll(); last_basket_close = TimeCurrent(); return;
+         CloseAllProfitOnly(); last_basket_close = TimeCurrent(); return;
       } else if(b_t > 0 && s_t == 0 && b_p_thb > 0) {
-         CloseSide(POSITION_TYPE_BUY); last_basket_close = TimeCurrent(); return;
+         CloseSideProfitOnly(POSITION_TYPE_BUY); last_basket_close = TimeCurrent(); return;
       } else if(s_t > 0 && b_t == 0 && s_p_thb > 0) {
-         CloseSide(POSITION_TYPE_SELL); last_basket_close = TimeCurrent(); return;
+         CloseSideProfitOnly(POSITION_TYPE_SELL); last_basket_close = TimeCurrent(); return;
       }
    }
    
@@ -550,7 +550,7 @@ if(!is_processing)
       if(total_thb >= Inp_Force_Close_THB)
       {
          Print("🚪 Force Close (Profit Mode) = ", total_thb);
-         CloseAll();
+         CloseAllProfitOnly();
          last_basket_close = TimeCurrent();
          return;
       }
@@ -571,7 +571,7 @@ if(!is_processing)
       if(total_thb >= Inp_Force_Close_THB && velocity < Inp_Force_Close_Velocity)
       {
          Print("🚀 Fast Close (Low Volatility)");
-         CloseAll();
+         CloseAllProfitOnly();
          last_basket_close = TimeCurrent();
          return;
       }
@@ -633,8 +633,8 @@ if(!is_processing)
    }
 
    if(Inp_Exit_Mode == Money_Target) {
-   if(b_p_thb >= Inp_Target_THB && b_t > 0) { CloseSide(POSITION_TYPE_BUY); last_basket_close = TimeCurrent(); UpdateConsecRecord(true); ShowBigMessage("🎯 ถึงเป้าหมาย BUY แล้ว!", clrLime); }
-   if(s_p_thb >= Inp_Target_THB && s_t > 0) { CloseSide(POSITION_TYPE_SELL); last_basket_close = TimeCurrent(); UpdateConsecRecord(true); ShowBigMessage("🎯 ถึงเป้าหมาย SELL แล้ว!", clrLime); }
+   if(b_p_thb >= Inp_Target_THB && b_t > 0) { CloseSideProfitOnly(POSITION_TYPE_BUY); last_basket_close = TimeCurrent(); UpdateConsecRecord(true); ShowBigMessage("🎯 ถึงเป้าหมาย BUY แล้ว!", clrLime); }
+   if(s_p_thb >= Inp_Target_THB && s_t > 0) { CloseSideProfitOnly(POSITION_TYPE_SELL); last_basket_close = TimeCurrent(); UpdateConsecRecord(true); ShowBigMessage("🎯 ถึงเป้าหมาย SELL แล้ว!", clrLime); }
   }
   // --- ตรวจสอบเส้นฉลาด ---
   if(g_order_line_enabled) CheckOrderLineHit();
@@ -885,7 +885,10 @@ int CountSupportOrders() {
 void CloseSupportOnly() {
    for(int i=PositionsTotal()-1; i>=0; i--) {
       ulong tk = PositionGetTicket(i);
-      if(PositionSelectByTicket(tk) && PositionGetInteger(POSITION_MAGIC) == Inp_Support_Magic) trade.PositionClose(tk);
+      if(!PositionSelectByTicket(tk)) continue;
+      if(PositionGetInteger(POSITION_MAGIC) != Inp_Support_Magic) continue;
+      double profit = PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
+      if(profit >= 0) trade.PositionClose(tk);
    }
 }
 
@@ -1300,7 +1303,7 @@ void ApplyBasketTrailing(ENUM_POSITION_TYPE type, double avg_price, double profi
 bool CheckGlobalBasketExit(double profit_thb, double profit_usd, double total_vol) {
    if(total_vol <= 0) return false;
    double current_points = (profit_usd) / (total_vol * SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE) / SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE)) / _Point;
-   if(current_points >= Inp_Target_Points && profit_thb >= Inp_Min_Profit_THB) { CloseAll(); return true; } return false;
+   if(current_points >= Inp_Target_Points && profit_thb >= Inp_Min_Profit_THB) { CloseAllProfitOnly(); return true; } return false;
 }
 
 void UpdateHardTP(ENUM_POSITION_TYPE type, double avg_price, double total_vol, double divider) {
@@ -1394,6 +1397,34 @@ void CloseAll() {
    g_rescue_active = false;
    g_last_buy_rescue_lot = 0;
    g_last_sell_rescue_lot = 0;
+}
+
+// --- CloseSideProfitOnly: ปิดเฉพาะไม้ที่กำไร ---
+void CloseSideProfitOnly(ENUM_POSITION_TYPE t) {
+   for(int i=PositionsTotal()-1; i>=0; i--) {
+      ulong ticket = PositionGetTicket(i);
+      if(!PositionSelectByTicket(ticket)) continue;
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+      if((ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE) != t) continue;
+      long magic = PositionGetInteger(POSITION_MAGIC);
+      if(magic != Inp_Magic && magic != Inp_Rescue_Magic &&
+         magic != Inp_Support_Magic && magic != Inp_Pull_Magic) continue;
+      double profit = PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
+      if(profit >= 0) trade.PositionClose(ticket);
+   }
+}
+
+// --- CloseAllProfitOnly: ปิดเฉพาะไม้ที่กำไร (ไม่ตัดขาดทุน) ---
+void CloseAllProfitOnly() {
+   for(int i=PositionsTotal()-1; i>=0; i--) {
+      ulong ticket = PositionGetTicket(i);
+      if(!PositionSelectByTicket(ticket)) continue;
+      long magic = PositionGetInteger(POSITION_MAGIC);
+      if(magic != Inp_Magic && magic != Inp_Support_Magic &&
+         magic != Inp_Rescue_Magic && magic != Inp_Pull_Magic) continue;
+      double profit = PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
+      if(profit >= 0) trade.PositionClose(ticket);
+   }
 }
 
 void MakeRect(string n, int x, int y, int xs, int ys, color c) { ObjectCreate(0,n,OBJ_RECTANGLE_LABEL,0,0,0); ObjectSetInteger(0,n,OBJPROP_XDISTANCE,x); ObjectSetInteger(0,n,OBJPROP_YDISTANCE,y); ObjectSetInteger(0,n,OBJPROP_XSIZE,xs); ObjectSetInteger(0,n,OBJPROP_YSIZE,ys); ObjectSetInteger(0,n,OBJPROP_BGCOLOR,c); ObjectSetInteger(0,n,OBJPROP_BORDER_TYPE,BORDER_FLAT); ObjectSetInteger(0,n,OBJPROP_ZORDER,0); }
@@ -2487,7 +2518,7 @@ void SmartPullRecovery(double divider)
    if(total_positions >= 2 && total_thb >= Inp_Pull_Close_THB)
    {
       Print("Offset Close All! Net=", DoubleToString(total_thb, 2), " THB");
-      CloseAll();
+      CloseAllProfitOnly();
       last_basket_close = TimeCurrent();
       return;
    }
