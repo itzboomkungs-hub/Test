@@ -171,6 +171,7 @@ input int    Inp_OL_Width          = 2;
 
 // --- Global Variables ---
 int h_ma, h_atr, h_rsi;
+int h_fast_ma_m5, h_slow_ma_m5;
 datetime expire_date;
 bool is_authorized = false, is_processing = false;
 bool g_auto_mode = true; 
@@ -303,6 +304,8 @@ int OnInit() {
    h_atr = iATR(_Symbol, PERIOD_H1, 14);
   // h_atr = iATR(_Symbol, PERIOD_H1, 14); // ดึงค่าความผันผวนจาก H1
    h_rsi = iRSI(_Symbol, _Period, 14, PRICE_CLOSE);
+   h_fast_ma_m5 = iMA(_Symbol, PERIOD_M5, 5, 0, MODE_EMA, PRICE_CLOSE);
+   h_slow_ma_m5 = iMA(_Symbol, PERIOD_M5, 20, 0, MODE_EMA, PRICE_CLOSE);
    trade.SetExpertMagicNumber(Inp_Magic);
    
    g_trend_filter = Inp_Use_Trend_H1;
@@ -459,8 +462,6 @@ void OnTick() {
 // ===============================
 if(!is_processing)
 {
-   double velocity = MathAbs(iClose(_Symbol, PERIOD_M1, 0)
-                    - iOpen(_Symbol, PERIOD_M1, 0)) / _Point;
 
    if(Inp_Force_Close_Mode == CLOSE_OFF)
    {
@@ -643,7 +644,7 @@ if(!found)
    
    double cp = (t == POSITION_TYPE_BUY) ? SymbolInfoDouble(_Symbol, SYMBOL_ASK) : SymbolInfoDouble(_Symbol, SYMBOL_BID);
    if((t == POSITION_TYPE_BUY && cp <= lp - final_dist) || (t == POSITION_TYPE_SELL && cp >= lp + final_dist)) {
-      double nl = SafeLot(ll * Inp_Lot_Multiplier);
+      double nl = SafeLot(MathMin(ll * Inp_Lot_Multiplier, Inp_Rescue_Max_Lot));
       trade.SetExpertMagicNumber(Inp_Magic);
       bool opened = trade.PositionOpen(_Symbol, (t==POSITION_TYPE_BUY?ORDER_TYPE_BUY:ORDER_TYPE_SELL), nl, 0, 0, 0, "แก้โดยระบบออโต้");
       if(opened) {
@@ -768,7 +769,7 @@ void CheckMobileHedge()
 void OpenSupportOrder() {
    int b_main = 0, s_main = 0;
    for(int i=PositionsTotal()-1; i>=0; i--) {
-      if(PositionSelectByTicket(PositionGetTicket(i)) && PositionGetInteger(POSITION_MAGIC) == Inp_Magic) {
+      if(PositionSelectByTicket(PositionGetTicket(i)) && PositionGetString(POSITION_SYMBOL) == _Symbol && PositionGetInteger(POSITION_MAGIC) == Inp_Magic) {
          if(PositionGetInteger(POSITION_TYPE)==POSITION_TYPE_BUY) b_main++; else s_main++;
       }
    }
@@ -780,7 +781,7 @@ void OpenSupportOrder() {
 int CountSupportOrders() {
    int count = 0;
    for(int i=PositionsTotal()-1; i>=0; i--) {
-      if(PositionSelectByTicket(PositionGetTicket(i)) && PositionGetInteger(POSITION_MAGIC) == Inp_Support_Magic) count++;
+      if(PositionSelectByTicket(PositionGetTicket(i)) && PositionGetString(POSITION_SYMBOL) == _Symbol && PositionGetInteger(POSITION_MAGIC) == Inp_Support_Magic) count++;
    }
    return count;
 }
@@ -788,7 +789,7 @@ int CountSupportOrders() {
 void CloseSupportOnly() {
    for(int i=PositionsTotal()-1; i>=0; i--) {
       ulong tk = PositionGetTicket(i);
-      if(PositionSelectByTicket(tk) && PositionGetInteger(POSITION_MAGIC) == Inp_Support_Magic) trade.PositionClose(tk);
+      if(PositionSelectByTicket(tk) && PositionGetString(POSITION_SYMBOL) == _Symbol && PositionGetInteger(POSITION_MAGIC) == Inp_Support_Magic) trade.PositionClose(tk);
    }
 }
 
@@ -1268,56 +1269,17 @@ bool IsRescueTrendConfirmed(
    if(!Inp_Rescue_Trend_Only)
       return true;
 
-   // ===== EMA =====
-   int fastHandle =
-      iMA(
-         _Symbol,
-         PERIOD_M5,
-         5,
-         0,
-         MODE_EMA,
-         PRICE_CLOSE
-      );
-
-   int slowHandle =
-      iMA(
-         _Symbol,
-         PERIOD_M5,
-         20,
-         0,
-         MODE_EMA,
-         PRICE_CLOSE
-      );
-
+   // ===== EMA (ใช้ handle จาก OnInit) =====
    double fastMA[];
    double slowMA[];
 
-   ArraySetAsSeries(
-      fastMA,
-      true
-   );
+   ArraySetAsSeries(fastMA, true);
+   ArraySetAsSeries(slowMA, true);
 
-   ArraySetAsSeries(
-      slowMA,
-      true
-   );
-
-   if(CopyBuffer(
-      fastHandle,
-      0,
-      0,
-      1,
-      fastMA
-   ) <= 0)
+   if(CopyBuffer(h_fast_ma_m5, 0, 0, 1, fastMA) <= 0)
       return false;
 
-   if(CopyBuffer(
-      slowHandle,
-      0,
-      0,
-      1,
-      slowMA
-   ) <= 0)
+   if(CopyBuffer(h_slow_ma_m5, 0, 0, 1, slowMA) <= 0)
       return false;
 
    // ราคาแท่งล่าสุด
