@@ -117,6 +117,7 @@ input int     Inp_Trail_Step      = 50;     // ระยะขยับทีล
 // --- [กลุ่มที่ 8.5: ระบบ TP ทุกไม้ & Trailing TP] ---
 input group "🎯 TP ทุกไม้ & Trailing TP (ล็อคกำไร)"
 input bool   Inp_Use_All_TP          = true;    // ตั้ง TP ทุกไม้อัตโนมัติ
+input bool   Inp_Auto_TP             = true;    // คำนวณ TP อัตโนมัติจาก ATR
 input int    Inp_All_TP_Points       = 500;     // TP ห่างจากราคาเปิดแต่ละไม้ (จุด)
 input bool   Inp_Use_Trailing_TP     = true;    // เปิดระบบ Trailing TP (TP ขยับตามราคา)
 input int    Inp_Trail_TP_Trigger    = 300;     // เริ่ม Trail เมื่อกำไรกี่จุด
@@ -124,13 +125,6 @@ input int    Inp_Trail_TP_Distance   = 200;     // TP ห่างจากร�
 input int    Inp_Trail_TP_Step       = 50;      // ขยับ TP ทีละกี่จุด
 input int    Inp_Trail_TP_Min_Profit = 50;      // กำไรขั้นต่ำที่ต้องล็อค (จุด)
 
-// --- [กลุ่มที่ 8.6: ระบบ SL กันหน้าทุกไม้] ---
-input group "🛡️ SL กันหน้าทุกไม้ (Trailing SL ทุกไม้)"
-input bool   Inp_Use_All_SL          = true;    // เปิดระบบ SL กันหน้าทุกไม้
-input int    Inp_All_SL_Trigger      = 300;     // เริ่มวาง SL เมื่อกำไรกี่จุด
-input int    Inp_All_SL_Lock         = 100;     // SL ล็อคกำไรกี่จุดจากราคาเปิด
-input int    Inp_All_SL_Trail_Dist   = 250;     // SL ห่างจากราคาปัจจุบัน (ขณะ Trail)
-input int    Inp_All_SL_Step         = 50;      // ขยับ SL ทีละกี่จุด
 
 // --- [กลุ่มที่ 9: ระบบ การตั้งค่าระยะแก้ไม้] ---
 input group "📐 การตั้งค่าระยะแก้ไม้"
@@ -202,6 +196,30 @@ input int    Inp_Pull_Magic          = 777777;  // Magic Number ไม้ดึ�
 input int    Inp_Pull_Cooldown       = 60;      // Cooldown (วินาที) กันยิงรัว
 
 
+// --- [กลุ่มที่ 15: กรองเวลาเทรด] ---
+input group "🕐 กรองเวลาเทรด (Session Filter)"
+input bool   Inp_Use_Session_Filter  = false;   // เปิดระบบกรองเวลา
+input int    Inp_Session_Start_Hour  = 9;       // เริ่มเทรด (ชั่วโมง, 0-23)
+input int    Inp_Session_End_Hour    = 23;      // หยุดเทรด (ชั่วโมง, 0-23)
+
+// --- [กลุ่มที่ 16: กรอง RSI + เทรนด์ร่วมกัน] ---
+input group "📈 กรอง RSI + เทรนด์ (Multi-Filter)"
+input bool   Inp_Use_Multi_Filter   = true;    // เปิดระบบกรอง RSI + เทรนด์
+input int    Inp_RSI_OB             = 75;      // RSI Overbought
+input int    Inp_RSI_OS             = 25;      // RSI Oversold
+
+// --- [กลุ่มที่ 17: TP แบ่งปิด (Partial Close)] ---
+input group "🎯 TP แบ่งปิด (Partial Close)"
+input bool   Inp_Use_Partial_Close  = true;    // เปิดระบบปิดครึ่งเมื่อกำไร
+input double Inp_Partial_Pct        = 50.0;    // ปิดกี่ % ของ lot (เช่น 50 = ครึ่ง)
+input int    Inp_Partial_Trigger    = 250;     // เริ่มปิดบางส่วนเมื่อกำไรกี่จุด
+
+// --- [กลุ่มที่ 18: ลด Lot อัตโนมัติ (Anti-Martingale)] ---
+input group "📉 ลด Lot อัตโนมัติ (Anti-Martingale)"
+input bool   Inp_Use_Anti_Mart      = true;    // เปิดระบบ Anti-Martingale
+input int    Inp_Consec_Loss_Limit  = 3;       // ขาดทุนต่อเนื่องกี่ครั้งก่อนลด lot
+input double Inp_Lot_Reduce_Pct     = 50.0;    // ลด lot กี่ % (เช่น 50 = ครึ่ง)
+
 
 // --- Global Variables ---
 int h_ma, h_atr, h_rsi;
@@ -214,6 +232,10 @@ bool g_double_force = true;
 bool g_trend_filter = false;    // ตัวแปรเก็บสถานะปุ่ม Trend H1
 datetime LastRecoveryTime = 0;
 datetime g_last_pull_time = 0;
+
+// --- ตัวแปร Anti-Martingale & Partial Close ---
+int g_consec_losses = 0;
+int g_consec_wins = 0;
 
 double LastEntryPrice = 0;
 
@@ -486,7 +508,9 @@ void OnTick() {
 
    // TP ทุกไม้ & Trailing TP (ล็อคกำไร)
    ManageAllPositionsTP();
-   ManageAllPositionsSL();
+
+   // TP แบ่งปิด (Partial Close)
+   ManagePartialClose();
 
    double velocity = MathAbs(iClose(_Symbol, PERIOD_M1, 0) - iOpen(_Symbol, PERIOD_M1, 0)) / _Point;
    if(Inp_Use_AI_Exit && total_thb > (Inp_Target_THB * 0.5) && velocity < 5.0 && (b_t > 0 || s_t > 0)) { 
@@ -560,16 +584,17 @@ if(!is_processing)
             bool is_uptrend = (iClose(_Symbol, PERIOD_H1, 0) > ma_v[0]);  
               //bool is_uptrend = (iClose(_Symbol, PERIOD_H1, 0) > ma_v[0]);
 
+               if(!IsInTradingSession()) trigger = false;
             if(trigger) {
                trade.SetExpertMagicNumber(Inp_Magic);
                if(g_trend_filter) {
                   // ถ้าเปิดกรองเทรนด์ จะเปิดเฉพาะฝั่งที่เทรนด์ 
-                  if(is_uptrend) trade.Buy(SafeLot(Inp_BaseLot));
-                  else trade.Sell(SafeLot(Inp_BaseLot));
+                  if(is_uptrend) trade.Buy(SafeLot(GetAntiMartLot(Inp_BaseLot)));
+                  else trade.Sell(SafeLot(GetAntiMartLot(Inp_BaseLot)));
                } else {
                   // ถ้าไม่กรองเทรนด์ เปิดตามลอจิกเดิม (Double Force)
-                  trade.Buy(SafeLot(Inp_BaseLot));
-                  if(g_double_force) trade.Sell(SafeLot(Inp_BaseLot)); 
+                  trade.Buy(SafeLot(GetAntiMartLot(Inp_BaseLot)));
+                  if(g_double_force) trade.Sell(SafeLot(GetAntiMartLot(Inp_BaseLot))); 
                }
                lastTradeTime = TimeCurrent();
                if(Inp_Use_Support) OpenSupportOrder();
@@ -585,8 +610,8 @@ if(!is_processing)
    }
 
    if(Inp_Exit_Mode == Money_Target) {
-   if(b_p_thb >= Inp_Target_THB && b_t > 0) { CloseSide(POSITION_TYPE_BUY); last_basket_close = TimeCurrent(); }
-   if(s_p_thb >= Inp_Target_THB && s_t > 0) { CloseSide(POSITION_TYPE_SELL); last_basket_close = TimeCurrent(); }
+   if(b_p_thb >= Inp_Target_THB && b_t > 0) { CloseSide(POSITION_TYPE_BUY); last_basket_close = TimeCurrent(); UpdateConsecRecord(true); }
+   if(s_p_thb >= Inp_Target_THB && s_t > 0) { CloseSide(POSITION_TYPE_SELL); last_basket_close = TimeCurrent(); UpdateConsecRecord(true); }
   }
   // --- ตรวจสอบเส้นฉลาด ---
   if(g_order_line_enabled) CheckOrderLineHit();
@@ -606,6 +631,10 @@ if(!is_processing)
 //--- Functions ---
 void SmartCheckRecovery(ENUM_POSITION_TYPE t, int tot, double atr) {
    if(Inp_Use_Max_Main && tot >= Inp_Max_Main_Orders) return;
+
+   // กรองเวลาเทรด + กรอง RSI+เทรนด์
+   if(!IsInTradingSession()) return;
+   if(!PassMultiFilter(t)) return;
 
    // ถ้าเปิดกรองเทรนด์ จะไม่แก้ไม้ฝั่งที่สวนเทรนด์
    if(g_trend_filter) {
@@ -1716,6 +1745,34 @@ void ManageAllPositionsTP()
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
 
+   // Auto TP: คำนวณค่าจาก ATR อัตโนมัติ
+   int tp_points = Inp_All_TP_Points;
+   int tp_trigger = Inp_Trail_TP_Trigger;
+   int tp_distance = Inp_Trail_TP_Distance;
+   int tp_step = Inp_Trail_TP_Step;
+   int tp_min_profit = Inp_Trail_TP_Min_Profit;
+
+   if(Inp_Auto_TP)
+   {
+      double atr_v[];
+      ArraySetAsSeries(atr_v, true);
+      if(CopyBuffer(h_atr, 0, 0, 1, atr_v) > 0 && atr_v[0] > 0)
+      {
+         int atr_pts = (int)(atr_v[0] / _Point);
+         tp_points     = (int)(atr_pts * 2.0);
+         tp_trigger    = (int)(atr_pts * 1.0);
+         tp_distance   = (int)(atr_pts * 0.7);
+         tp_step       = (int)(atr_pts * 0.15);
+         tp_min_profit = (int)(atr_pts * 0.2);
+         if(tp_points < 100) tp_points = 100;
+         if(tp_trigger < 50) tp_trigger = 50;
+         if(tp_distance < 30) tp_distance = 30;
+         if(tp_step < 10) tp_step = 10;
+         if(tp_min_profit < 10) tp_min_profit = 10;
+      }
+   }
+
+
    for(int i = PositionsTotal()-1; i >= 0; i--)
    {
       ulong ticket = PositionGetTicket(i);
@@ -1735,8 +1792,8 @@ void ManageAllPositionsTP()
 
       if(type == POSITION_TYPE_BUY)
       {
-         double min_tp = NormalizeDouble(op + Inp_Trail_TP_Min_Profit * _Point, _Digits);
-         double initial_tp = NormalizeDouble(op + Inp_All_TP_Points * _Point, _Digits);
+         double min_tp = NormalizeDouble(op + tp_min_profit * _Point, _Digits);
+         double initial_tp = NormalizeDouble(op + tp_points * _Point, _Digits);
          initial_tp = MathMax(initial_tp, min_tp);
 
          if(tp == 0 || tp <= op)
@@ -1748,20 +1805,20 @@ void ManageAllPositionsTP()
          if(Inp_Use_Trailing_TP && tp > op)
          {
             double profit_pts = (bid - op) / _Point;
-            if(profit_pts >= Inp_Trail_TP_Trigger)
+            if(profit_pts >= tp_trigger)
             {
-               double new_tp = NormalizeDouble(bid + Inp_Trail_TP_Distance * _Point, _Digits);
+               double new_tp = NormalizeDouble(bid + tp_distance * _Point, _Digits);
                new_tp = MathMax(new_tp, min_tp);
 
-               if(new_tp > tp + Inp_Trail_TP_Step * _Point)
+               if(new_tp > tp + tp_step * _Point)
                   trade.PositionModify(ticket, sl, new_tp);
             }
          }
       }
       else // SELL
       {
-         double min_tp = NormalizeDouble(op - Inp_Trail_TP_Min_Profit * _Point, _Digits);
-         double initial_tp = NormalizeDouble(op - Inp_All_TP_Points * _Point, _Digits);
+         double min_tp = NormalizeDouble(op - tp_min_profit * _Point, _Digits);
+         double initial_tp = NormalizeDouble(op - tp_points * _Point, _Digits);
          initial_tp = MathMin(initial_tp, min_tp);
 
          if(tp == 0 || tp >= op)
@@ -1773,12 +1830,12 @@ void ManageAllPositionsTP()
          if(Inp_Use_Trailing_TP && tp > 0 && tp < op)
          {
             double profit_pts = (op - ask) / _Point;
-            if(profit_pts >= Inp_Trail_TP_Trigger)
+            if(profit_pts >= tp_trigger)
             {
-               double new_tp = NormalizeDouble(ask - Inp_Trail_TP_Distance * _Point, _Digits);
+               double new_tp = NormalizeDouble(ask - tp_distance * _Point, _Digits);
                new_tp = MathMin(new_tp, min_tp);
 
-               if(new_tp < tp - Inp_Trail_TP_Step * _Point && new_tp > 0)
+               if(new_tp < tp - tp_step * _Point && new_tp > 0)
                   trade.PositionModify(ticket, sl, new_tp);
             }
          }
@@ -1786,40 +1843,56 @@ void ManageAllPositionsTP()
    }
 }
 
+
 //+------------------------------------------------------------------+
-//| ManageAllPositionsSL - SL กันหน้าทุกไม้ (Trailing SL ทุกไม้)     |
+//| IsInTradingSession - ตรวจว่าอยู่ในเวลาเทรดหรือไม่              |
 //+------------------------------------------------------------------+
-void ManageAllPositionsSL()
+bool IsInTradingSession()
 {
-   if(!Inp_Use_All_SL) return;
+   if(!Inp_Use_Session_Filter) return true;
+   MqlDateTime tm;
+   TimeLocal(tm);
+   int hour = tm.hour;
+   if(Inp_Session_Start_Hour < Inp_Session_End_Hour)
+      return (hour >= Inp_Session_Start_Hour && hour < Inp_Session_End_Hour);
+   else
+      return (hour >= Inp_Session_Start_Hour || hour < Inp_Session_End_Hour);
+}
+
+//+------------------------------------------------------------------+
+//| PassMultiFilter - ตรวจ RSI + เทรนด์ก่อนเปิดไม้                  |
+//+------------------------------------------------------------------+
+bool PassMultiFilter(ENUM_POSITION_TYPE t)
+{
+   if(!Inp_Use_Multi_Filter) return true;
+
+   double rsi_v[];
+   ArraySetAsSeries(rsi_v, true);
+   if(CopyBuffer(h_rsi, 0, 0, 1, rsi_v) <= 0) return true;
+   double rsi = rsi_v[0];
+
+   double ma_v[];
+   ArraySetAsSeries(ma_v, true);
+   if(CopyBuffer(h_ma, 0, 0, 1, ma_v) <= 0) return true;
+   bool is_uptrend = (iClose(_Symbol, PERIOD_H1, 0) > ma_v[0]);
+
+   // ไม่เปิด BUY ถ้า RSI overbought + เทรนด์ลง
+   if(t == POSITION_TYPE_BUY && rsi >= Inp_RSI_OB && !is_uptrend) return false;
+   // ไม่เปิด SELL ถ้า RSI oversold + เทรนด์ขึ้น
+   if(t == POSITION_TYPE_SELL && rsi <= Inp_RSI_OS && is_uptrend) return false;
+
+   return true;
+}
+
+//+------------------------------------------------------------------+
+//| ManagePartialClose - ปิดบางส่วนเมื่อกำไรถึง trigger             |
+//+------------------------------------------------------------------+
+void ManagePartialClose()
+{
+   if(!Inp_Use_Partial_Close) return;
 
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-
-   // Auto SL: คำนวณค่าจาก ATR อัตโนมัติ
-   int sl_trigger = Inp_All_SL_Trigger;
-   int sl_lock = Inp_All_SL_Lock;
-   int sl_trail_dist = Inp_All_SL_Trail_Dist;
-   int sl_step = Inp_All_SL_Step;
-
-   if(Inp_Auto_SL)
-   {
-      double atr_v[];
-      ArraySetAsSeries(atr_v, true);
-      if(CopyBuffer(h_atr, 0, 0, 1, atr_v) > 0 && atr_v[0] > 0)
-      {
-         int atr_pts = (int)(atr_v[0] / _Point);
-         sl_trigger    = (int)(atr_pts * 1.0);
-         sl_lock       = (int)(atr_pts * 0.3);
-         sl_trail_dist = (int)(atr_pts * 0.8);
-         sl_step       = (int)(atr_pts * 0.15);
-         if(sl_trigger < 50) sl_trigger = 50;
-         if(sl_lock < 10) sl_lock = 10;
-         if(sl_trail_dist < 30) sl_trail_dist = 30;
-         if(sl_step < 10) sl_step = 10;
-      }
-   }
-
 
    for(int i = PositionsTotal()-1; i >= 0; i--)
    {
@@ -1830,58 +1903,69 @@ void ManageAllPositionsSL()
       long magic = PositionGetInteger(POSITION_MAGIC);
       if(magic != Inp_Magic && magic != Inp_Rescue_Magic &&
          magic != Inp_Support_Magic && magic != MagicNumber &&
-         magic != Inp_Pull_Magic &&
-         magic != 0) continue;
+         magic != Inp_Pull_Magic && magic != 0) continue;
 
       ENUM_POSITION_TYPE type = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
       double op = PositionGetDouble(POSITION_PRICE_OPEN);
-      double sl = PositionGetDouble(POSITION_SL);
-      double tp = PositionGetDouble(POSITION_TP);
+      double vol = PositionGetDouble(POSITION_VOLUME);
+      string comment = PositionGetString(POSITION_COMMENT);
 
+      // ข้ามถ้าปิดบางส่วนไปแล้ว หรือ lot เหลือน้อยเกินไป
+      if(StringFind(comment, "Partial") >= 0) continue;
+      double min_lot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+      if(vol <= min_lot) continue;
+
+      double profit_pts = 0;
       if(type == POSITION_TYPE_BUY)
+         profit_pts = (bid - op) / _Point;
+      else
+         profit_pts = (op - ask) / _Point;
+
+      if(profit_pts >= Inp_Partial_Trigger)
       {
-         double profit_pts = (bid - op) / _Point;
-
-         if(profit_pts >= sl_trigger)
+         double close_vol = SafeLot(vol * Inp_Partial_Pct / 100.0);
+         if(close_vol >= min_lot)
          {
-            double lock_sl = NormalizeDouble(op + sl_lock * _Point, _Digits);
-
-            if(sl == 0 || sl < op)
-            {
-               trade.PositionModify(ticket, lock_sl, tp);
-            }
-            else
-            {
-               double trail_sl = NormalizeDouble(bid - sl_trail_dist * _Point, _Digits);
-               trail_sl = MathMax(trail_sl, lock_sl);
-
-               if(trail_sl > sl + sl_step * _Point)
-                  trade.PositionModify(ticket, trail_sl, tp);
-            }
+            trade.PositionClosePartial(ticket, close_vol);
+            Print("Partial Close | Ticket=", ticket,
+                  " Vol=", DoubleToString(close_vol,2),
+                  " Profit=", DoubleToString(profit_pts,0), " pts");
          }
       }
-      else // SELL
-      {
-         double profit_pts = (op - ask) / _Point;
+   }
+}
 
-         if(profit_pts >= sl_trigger)
-         {
-            double lock_sl = NormalizeDouble(op - sl_lock * _Point, _Digits);
+//+------------------------------------------------------------------+
+//| GetAntiMartLot - คำนวณ lot ตาม Anti-Martingale                   |
+//+------------------------------------------------------------------+
+double GetAntiMartLot(double base_lot)
+{
+   if(!Inp_Use_Anti_Mart) return base_lot;
+   if(g_consec_losses >= Inp_Consec_Loss_Limit)
+   {
+      double reduced = base_lot * (1.0 - Inp_Lot_Reduce_Pct / 100.0);
+      if(reduced < SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN))
+         reduced = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+      return reduced;
+   }
+   return base_lot;
+}
 
-            if(sl == 0 || sl > op)
-            {
-               trade.PositionModify(ticket, lock_sl, tp);
-            }
-            else
-            {
-               double trail_sl = NormalizeDouble(ask + sl_trail_dist * _Point, _Digits);
-               trail_sl = MathMin(trail_sl, lock_sl);
-
-               if(trail_sl < sl - sl_step * _Point && trail_sl > 0)
-                  trade.PositionModify(ticket, trail_sl, tp);
-            }
-         }
-      }
+//+------------------------------------------------------------------+
+//| UpdateConsecRecord - อัปเดตสถิติชนะ/แพ้ต่อเนื่อง                |
+//+------------------------------------------------------------------+
+void UpdateConsecRecord(bool is_win)
+{
+   if(!Inp_Use_Anti_Mart) return;
+   if(is_win)
+   {
+      g_consec_wins++;
+      g_consec_losses = 0;
+   }
+   else
+   {
+      g_consec_losses++;
+      g_consec_wins = 0;
    }
 }
 
