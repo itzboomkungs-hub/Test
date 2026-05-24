@@ -991,8 +991,11 @@ void CloseSide(ENUM_POSITION_TYPE t) { for(int i=PositionsTotal()-1; i>=0; i--) 
 void CloseAll() { 
    for(int i=PositionsTotal()-1; i>=0; i--) {
       ulong ticket = PositionGetTicket(i);
-      if(PositionSelectByTicket(ticket) && (PositionGetInteger(POSITION_MAGIC) == Inp_Magic || PositionGetInteger(POSITION_MAGIC) == Inp_Support_Magic)) trade.PositionClose(ticket);
+      if(PositionSelectByTicket(ticket) && (PositionGetInteger(POSITION_MAGIC) == Inp_Magic || PositionGetInteger(POSITION_MAGIC) == Inp_Support_Magic || PositionGetInteger(POSITION_MAGIC) == Inp_Rescue_Magic)) trade.PositionClose(ticket);
    }
+   g_rescue_active = false;
+   g_last_buy_rescue_lot = 0;
+   g_last_sell_rescue_lot = 0;
 }
 
 void MakeRect(string n, int x, int y, int xs, int ys, color c) { ObjectCreate(0,n,OBJ_RECTANGLE_LABEL,0,0,0); ObjectSetInteger(0,n,OBJPROP_XDISTANCE,x); ObjectSetInteger(0,n,OBJPROP_YDISTANCE,y); ObjectSetInteger(0,n,OBJPROP_XSIZE,xs); ObjectSetInteger(0,n,OBJPROP_YSIZE,ys); ObjectSetInteger(0,n,OBJPROP_BGCOLOR,c); ObjectSetInteger(0,n,OBJPROP_BORDER_TYPE,BORDER_FLAT); ObjectSetInteger(0,n,OBJPROP_ZORDER,0); }
@@ -1395,6 +1398,8 @@ void CloseMainAndRescue() {
    }
 
    g_rescue_active = false;
+   g_last_buy_rescue_lot = 0;
+   g_last_sell_rescue_lot = 0;
    is_processing = false;
    last_basket_close = TimeCurrent();
 }
@@ -1403,7 +1408,11 @@ void CheckPanicRescue(double divider)
 {
    // รีเซ็ตสถานะ ถ้าไม่มีไม้แก้แล้ว
    if(CountRescueOrders() == 0)
+   {
       g_rescue_active = false;
+      g_last_buy_rescue_lot = 0;
+      g_last_sell_rescue_lot = 0;
+   }
 
    int b_t = 0, s_t = 0;
    double b_vol = 0.0, s_vol = 0.0;
