@@ -193,6 +193,15 @@ input double Inp_Pull_Close_THB      = 2.0;     // กำไรสุทธิ�
 input bool   Inp_Use_Emergency_Close = true;    // เปิดระบบกันพอร์ตแตก (Emergency)
 input double Inp_Emergency_DD_THB    = -500.0;  // ขาดทุนรวมสูงสุดก่อนปิดหมด (บาท)
 
+// --- [กลุ่มที่ 14: ระบบดึงไม้ดอย (Pull Recovery)] ---
+input group "🔄 ระบบดึงไม้ดอย (Pull Recovery)"
+input bool   Inp_Use_Pull_Lot        = true;    // เปิดระบบดึงไม้ดอย
+input double Inp_Pull_Trigger_DD     = 300.0;   // ขาดทุนเฉลี่ยต่อไม้ (จุด) เริ่มดึง
+input double Inp_Pull_Lot_Mult       = 1.5;     // ตัวคูณ lot (จาก lot รวมฝั่งที่ค้าง)
+input double Inp_Pull_Max_Lot        = 5.0;     // lot สูงสุดที่เปิดดึง
+input int    Inp_Pull_Magic          = 777777;  // Magic Number ไม้ดึง
+input int    Inp_Pull_Cooldown       = 60;      // Cooldown (วินาที) กันยิงรัว
+
 
 
 // --- Global Variables ---
@@ -205,6 +214,7 @@ bool g_mobile_hedge = true;
 bool g_double_force = true;   
 bool g_trend_filter = false;    // ตัวแปรเก็บสถานะปุ่ม Trend H1
 datetime LastRecoveryTime = 0;
+datetime g_last_pull_time = 0;
 
 double LastEntryPrice = 0;
 
@@ -589,6 +599,10 @@ if(!is_processing)
   // --- ระบบดึงกลับเมื่อเทรนด์กลับตัว & กันพอร์ตแตก ---
   if(!is_processing)
    SmartPullRecovery(divider);
+
+  // --- ระบบดึงไม้ดอย ---
+  if(!is_processing)
+   PullStuckPositions();
 }
 //--- Functions ---
 void SmartCheckRecovery(ENUM_POSITION_TYPE t, int tot, double atr) {
@@ -1023,7 +1037,7 @@ void CloseSide(ENUM_POSITION_TYPE t) { for(int i=PositionsTotal()-1; i>=0; i--) 
 void CloseAll() { 
    for(int i=PositionsTotal()-1; i>=0; i--) {
       ulong ticket = PositionGetTicket(i);
-      if(PositionSelectByTicket(ticket) && (PositionGetInteger(POSITION_MAGIC) == Inp_Magic || PositionGetInteger(POSITION_MAGIC) == Inp_Support_Magic || PositionGetInteger(POSITION_MAGIC) == Inp_Rescue_Magic)) trade.PositionClose(ticket);
+      if(PositionSelectByTicket(ticket) && (PositionGetInteger(POSITION_MAGIC) == Inp_Magic || PositionGetInteger(POSITION_MAGIC) == Inp_Support_Magic || PositionGetInteger(POSITION_MAGIC) == Inp_Rescue_Magic || PositionGetInteger(POSITION_MAGIC) == Inp_Pull_Magic)) trade.PositionClose(ticket);
    }
    g_rescue_active = false;
    g_last_buy_rescue_lot = 0;
@@ -1423,7 +1437,7 @@ void CloseMainAndRescue() {
          && PositionGetString(POSITION_SYMBOL) == _Symbol) {
          long magic = PositionGetInteger(POSITION_MAGIC);
 
-         if(magic == Inp_Magic || magic == Inp_Rescue_Magic) {
+         if(magic == Inp_Magic || magic == Inp_Rescue_Magic || magic == Inp_Pull_Magic) {
             trade.PositionClose(ticket);
          }
       }
@@ -1687,6 +1701,7 @@ void ManageAllPositionsTP()
       long magic = PositionGetInteger(POSITION_MAGIC);
       if(magic != Inp_Magic && magic != Inp_Rescue_Magic &&
          magic != Inp_Support_Magic && magic != MagicNumber &&
+         magic != Inp_Pull_Magic &&
          magic != 0) continue;
 
       ENUM_POSITION_TYPE type = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
@@ -1766,6 +1781,7 @@ void ManageAllPositionsSL()
       long magic = PositionGetInteger(POSITION_MAGIC);
       if(magic != Inp_Magic && magic != Inp_Rescue_Magic &&
          magic != Inp_Support_Magic && magic != MagicNumber &&
+         magic != Inp_Pull_Magic &&
          magic != 0) continue;
 
       ENUM_POSITION_TYPE type = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
@@ -1819,6 +1835,117 @@ void ManageAllPositionsSL()
       }
    }
 }
+
+//+------------------------------------------------------------------+
+//| PullStuckPositions - ดึงไม้ดอยด้วย lot คำนวณจากไม้ที่ค้าง       |
+//| SELL ดอย + เทรนด์ขึ้น → เปิด BUY ดึง                            |
+//| BUY ดอย + เทรนด์ลง → เปิด SELL ดึง                              |
+//+------------------------------------------------------------------+
+void PullStuckPositions()
+{
+   if(!Inp_Use_Pull_Lot) return;
+   if(TimeCurrent() - g_last_pull_time < Inp_Pull_Cooldown) return;
+
+   // ตรวจว่ามีไม้ดึงอยู่แล้วหรือยัง
+   for(int i = PositionsTotal()-1; i >= 0; i--)
+   {
+      ulong ticket = PositionGetTicket(i);
+      if(!PositionSelectByTicket(ticket)) continue;
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+      if(PositionGetInteger(POSITION_MAGIC) == Inp_Pull_Magic) return;
+   }
+
+   double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+
+   // ตรวจเทรนด์ H1
+   double ma_v[];
+   ArraySetAsSeries(ma_v, true);
+   if(CopyBuffer(h_ma, 0, 0, 1, ma_v) <= 0) return;
+   bool is_uptrend = (iClose(_Symbol, PERIOD_H1, 0) > ma_v[0]);
+
+   // คำนวณไม้ที่ค้างแต่ละฝั่ง
+   double buy_loss_pts = 0, sell_loss_pts = 0;
+   double buy_stuck_vol = 0, sell_stuck_vol = 0;
+   int buy_stuck = 0, sell_stuck = 0;
+
+   for(int i = PositionsTotal()-1; i >= 0; i--)
+   {
+      ulong ticket = PositionGetTicket(i);
+      if(!PositionSelectByTicket(ticket)) continue;
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+
+      long magic = PositionGetInteger(POSITION_MAGIC);
+      if(magic != Inp_Magic && magic != Inp_Rescue_Magic &&
+         magic != Inp_Support_Magic && magic != MagicNumber &&
+         magic != Inp_Pull_Magic && magic != 0) continue;
+
+      ENUM_POSITION_TYPE type = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+      double op = PositionGetDouble(POSITION_PRICE_OPEN);
+      double vol = PositionGetDouble(POSITION_VOLUME);
+
+      if(type == POSITION_TYPE_BUY)
+      {
+         double drag = (op - bid) / _Point;
+         if(drag > 0) { buy_loss_pts += drag; buy_stuck_vol += vol; buy_stuck++; }
+      }
+      else
+      {
+         double drag = (ask - op) / _Point;
+         if(drag > 0) { sell_loss_pts += drag; sell_stuck_vol += vol; sell_stuck++; }
+      }
+   }
+
+   // SELL ดอย + เทรนด์ขึ้น → เปิด BUY ดึง
+   if(sell_stuck > 0 && sell_stuck_vol > 0 && is_uptrend)
+   {
+      double avg_loss = sell_loss_pts / sell_stuck;
+      if(avg_loss >= Inp_Pull_Trigger_DD)
+      {
+         double lot = SafeLot(sell_stuck_vol * Inp_Pull_Lot_Mult);
+         lot = MathMin(lot, Inp_Pull_Max_Lot);
+         lot = SafeLot(lot);
+         if(lot > 0)
+         {
+            trade.SetExpertMagicNumber(Inp_Pull_Magic);
+            if(trade.Buy(lot, _Symbol, 0, 0, 0, "Pull BUY ดึงไม้ SELL ดอย"))
+            {
+               g_last_pull_time = TimeCurrent();
+               lastTradeTime = TimeCurrent();
+               Print("Pull BUY | SELL stuck=", sell_stuck, " vol=",
+                     DoubleToString(sell_stuck_vol,2),
+                     " pull lot=", DoubleToString(lot,2),
+                     " avg drag=", DoubleToString(avg_loss,0), " pts");
+            }
+         }
+      }
+   }
+
+   // BUY ดอย + เทรนด์ลง → เปิด SELL ดึง
+   if(buy_stuck > 0 && buy_stuck_vol > 0 && !is_uptrend)
+   {
+      double avg_loss = buy_loss_pts / buy_stuck;
+      if(avg_loss >= Inp_Pull_Trigger_DD)
+      {
+         double lot = SafeLot(buy_stuck_vol * Inp_Pull_Lot_Mult);
+         lot = MathMin(lot, Inp_Pull_Max_Lot);
+         lot = SafeLot(lot);
+         if(lot > 0)
+         {
+            trade.SetExpertMagicNumber(Inp_Pull_Magic);
+            if(trade.Sell(lot, _Symbol, 0, 0, 0, "Pull SELL ดึงไม้ BUY ดอย"))
+            {
+               g_last_pull_time = TimeCurrent();
+               lastTradeTime = TimeCurrent();
+               Print("Pull SELL | BUY stuck=", buy_stuck, " vol=",
+                     DoubleToString(buy_stuck_vol,2),
+                     " pull lot=", DoubleToString(lot,2),
+                     " avg drag=", DoubleToString(avg_loss,0), " pts");
+            }
+         }
+      }
+   }
+}
 //+------------------------------------------------------------------+
 //| SmartPullRecovery - หักลบปิดรวบ & กันพอร์ตแตก                    |
 //| เอากำไรจากไม้ข้างบน (กำไร) มาหักลบไม้ข้างล่าง (ขาดทุน)          |
@@ -1841,6 +1968,7 @@ void SmartPullRecovery(double divider)
       long magic = PositionGetInteger(POSITION_MAGIC);
       if(magic != Inp_Magic && magic != Inp_Rescue_Magic &&
          magic != Inp_Support_Magic && magic != MagicNumber &&
+         magic != Inp_Pull_Magic &&
          magic != 0) continue;
 
       total_profit_usd += PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
@@ -1884,6 +2012,7 @@ void SmartPullRecovery(double divider)
       long magic = PositionGetInteger(POSITION_MAGIC);
       if(magic != Inp_Magic && magic != Inp_Rescue_Magic &&
          magic != Inp_Support_Magic && magic != MagicNumber &&
+         magic != Inp_Pull_Magic &&
          magic != 0) continue;
 
       double p = PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
