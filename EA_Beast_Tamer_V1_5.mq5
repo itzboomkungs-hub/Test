@@ -610,6 +610,7 @@ if(!is_processing)
          }
       }
       UpdateUI(bal, 0, m_lv, daily_p_usc, b_t, s_t, atr_v[0], ma_v[0]);
+      UpdateRightPanel();
 
       if((m_lv > Inp_Min_Margin || m_lv == 0) && (datetime)TimeCurrent() - lastTradeTime > 3) {
          if(b_t > 0 && b_t < 20) SmartCheckRecovery(POSITION_TYPE_BUY, b_t, atr_v[0]);
@@ -924,8 +925,162 @@ y += 38;
    
    MakeLabel(BRT+"STATUS_L", PANEL_X+PAD, y+5, "สถานะพอร์ต:", "Tahoma", 9, CLR_LABEL);
    MakeLabel(BRT+"STATUS_V", PANEL_X+140, y+5, "...", "Tahoma", 9, clrWhite); 
+
+   // แสดง UI ฝั่งขวา
+   DrawRightPanel();
 }
 
+
+//+------------------------------------------------------------------+
+//| DrawRightPanel - แสดง UI ฝั่งขวา (กำไร/ขาดทุน/DD/%)             |
+//+------------------------------------------------------------------+
+void DrawRightPanel()
+{
+   string P = BRT+"RP_";
+   int chart_w = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
+   int pw = 230;
+   int px = chart_w - pw - 15;
+   int py = 20;
+   int row = 20;
+
+   // พื้นหลัง
+   MakeRect(P+"BG", px, py, pw, 280, C'20,12,35');
+   ObjectSetInteger(0, P+"BG", OBJPROP_BORDER_COLOR, C'80,50,120');
+   ObjectSetInteger(0, P+"BG", OBJPROP_ZORDER, 0);
+
+   // Header
+   MakeRect(P+"HDR", px, py, pw, 32, C'75,40,110');
+   ObjectSetInteger(0, P+"HDR", OBJPROP_ZORDER, 1);
+   MakeLabel(P+"TITLE", px+10, py+7, "📊 สรุปพอร์ต", "Segoe UI", 10, CLR_GOLD);
+
+   int y = py + 42;
+
+   // --- Balance ---
+   MakeLabel(P+"BAL_L", px+10, y, "Balance:", "Tahoma", 9, C'160,140,190');
+   MakeLabel(P+"BAL_V", px+110, y, "0.00", "Tahoma", 9, CLR_VALUE);
+   y += row;
+
+   // --- Equity ---
+   MakeLabel(P+"EQ_L", px+10, y, "Equity:", "Tahoma", 9, C'160,140,190');
+   MakeLabel(P+"EQ_V", px+110, y, "0.00", "Tahoma", 9, CLR_VALUE);
+   y += row;
+
+   // --- Divider ---
+   MakeRect(P+"DIV1", px+8, y, pw-16, 1, C'80,50,120');
+   y += 8;
+
+   // --- กำไร/ขาดทุนปัจจุบัน ---
+   MakeLabel(P+"PNL_L", px+10, y, "กำไร/ขาดทุน:", "Tahoma", 9, C'160,140,190');
+   MakeLabel(P+"PNL_V", px+110, y, "0.00", "Tahoma Bold", 11, CLR_PROFIT);
+   y += row + 2;
+
+   // --- กำไร % ---
+   MakeLabel(P+"PCT_L", px+10, y, "กำไร %:", "Tahoma", 9, C'160,140,190');
+   MakeLabel(P+"PCT_V", px+110, y, "0.00%", "Tahoma Bold", 11, CLR_PROFIT);
+   y += row + 2;
+
+   // --- Divider ---
+   MakeRect(P+"DIV2", px+8, y, pw-16, 1, C'80,50,120');
+   y += 8;
+
+   // --- Drawdown ---
+   MakeLabel(P+"DD_L", px+10, y, "Drawdown:", "Tahoma", 9, C'160,140,190');
+   MakeLabel(P+"DD_V", px+110, y, "0.00", "Tahoma Bold", 10, CLR_LOSS);
+   y += row;
+
+   // --- DD % ---
+   MakeLabel(P+"DDP_L", px+10, y, "DD %:", "Tahoma", 9, C'160,140,190');
+   MakeLabel(P+"DDP_V", px+110, y, "0.00%", "Tahoma Bold", 10, CLR_LOSS);
+   y += row + 2;
+
+   // --- Divider ---
+   MakeRect(P+"DIV3", px+8, y, pw-16, 1, C'80,50,120');
+   y += 8;
+
+   // --- กำไรวันนี้ ---
+   MakeLabel(P+"DAY_L", px+10, y, "วันนี้:", "Tahoma", 9, C'160,140,190');
+   MakeLabel(P+"DAY_V", px+110, y, "0.00", "Tahoma Bold", 10, CLR_GOLD);
+   y += row;
+
+   // --- จำนวนไม้ ---
+   MakeLabel(P+"POS_L", px+10, y, "ไม้ทั้งหมด:", "Tahoma", 9, C'160,140,190');
+   MakeLabel(P+"POS_V", px+110, y, "0", "Tahoma", 9, CLR_VALUE);
+   y += row;
+
+   // --- Margin Level ---
+   MakeLabel(P+"MG_L", px+10, y, "Margin Lv:", "Tahoma", 9, C'160,140,190');
+   MakeLabel(P+"MG_V", px+110, y, "0%", "Tahoma", 9, CLR_VALUE);
+
+   ChartRedraw();
+}
+
+//+------------------------------------------------------------------+
+//| UpdateRightPanel - อัปเดตค่าทุก tick                             |
+//+------------------------------------------------------------------+
+void UpdateRightPanel()
+{
+   string P = BRT+"RP_";
+
+   double bal = AccountInfoDouble(ACCOUNT_BALANCE);
+   double equ = AccountInfoDouble(ACCOUNT_EQUITY);
+   double margin_lv = AccountInfoDouble(ACCOUNT_MARGIN_LEVEL);
+   double pnl = equ - bal;
+   double pnl_pct = (bal > 0) ? (pnl / bal) * 100.0 : 0;
+
+   double dd = (pnl < 0) ? MathAbs(pnl) : 0;
+   double dd_pct = (bal > 0 && pnl < 0) ? (MathAbs(pnl) / bal) * 100.0 : 0;
+
+   string acc_curr = AccountInfoString(ACCOUNT_CURRENCY);
+   double divider = (StringFind(acc_curr, "USC") >= 0 || StringFind(acc_curr, "Cent") >= 0) ? 100.0 : 1.0;
+   double pnl_thb = (pnl / divider) * 32.0;
+   double dd_thb  = (dd / divider) * 32.0;
+
+   double daily_usc = GetDailyProfitUSC();
+   double daily_thb = (daily_usc / divider) * 32.0;
+
+   // จำนวนไม้
+   int total_pos = 0;
+   for(int i = PositionsTotal()-1; i >= 0; i--)
+   {
+      ulong tk = PositionGetTicket(i);
+      if(PositionSelectByTicket(tk) && PositionGetString(POSITION_SYMBOL) == _Symbol)
+         total_pos++;
+   }
+
+   // Balance & Equity
+   ObjectSetString(0, P+"BAL_V", OBJPROP_TEXT, DoubleToString(bal, 2));
+   ObjectSetString(0, P+"EQ_V", OBJPROP_TEXT, DoubleToString(equ, 2));
+
+   // กำไร/ขาดทุน
+   ObjectSetString(0, P+"PNL_V", OBJPROP_TEXT, DoubleToString(pnl_thb, 2) + " ฿");
+   ObjectSetInteger(0, P+"PNL_V", OBJPROP_COLOR, pnl >= 0 ? CLR_PROFIT : CLR_LOSS);
+
+   // กำไร %
+   ObjectSetString(0, P+"PCT_V", OBJPROP_TEXT, DoubleToString(pnl_pct, 2) + "%");
+   ObjectSetInteger(0, P+"PCT_V", OBJPROP_COLOR, pnl >= 0 ? CLR_PROFIT : CLR_LOSS);
+
+   // Drawdown
+   ObjectSetString(0, P+"DD_V", OBJPROP_TEXT, DoubleToString(dd_thb, 2) + " ฿");
+   ObjectSetInteger(0, P+"DD_V", OBJPROP_COLOR, dd_pct > 20 ? clrRed : (dd_pct > 10 ? clrOrangeRed : CLR_LOSS));
+
+   // DD %
+   ObjectSetString(0, P+"DDP_V", OBJPROP_TEXT, DoubleToString(dd_pct, 2) + "%");
+   ObjectSetInteger(0, P+"DDP_V", OBJPROP_COLOR, dd_pct > 20 ? clrRed : (dd_pct > 10 ? clrOrangeRed : CLR_LOSS));
+
+   // กำไรวันนี้
+   ObjectSetString(0, P+"DAY_V", OBJPROP_TEXT, DoubleToString(daily_thb, 2) + " ฿");
+   ObjectSetInteger(0, P+"DAY_V", OBJPROP_COLOR, daily_thb >= 0 ? CLR_GOLD : CLR_LOSS);
+
+   // จำนวนไม้
+   ObjectSetString(0, P+"POS_V", OBJPROP_TEXT, IntegerToString(total_pos));
+
+   // Margin Level
+   string mg_txt = (margin_lv > 0) ? DoubleToString(margin_lv, 0) + "%" : "ไม่มีไม้";
+   ObjectSetString(0, P+"MG_V", OBJPROP_TEXT, mg_txt);
+   ObjectSetInteger(0, P+"MG_V", OBJPROP_COLOR, margin_lv > 500 ? CLR_PROFIT : (margin_lv > 200 ? CLR_GOLD : CLR_LOSS));
+
+   ChartRedraw();
+}
 void UpdateUI(double bal, double equ, double mg, double daily_usc, int b_t, int s_t, double atr, double ma) {
    ObjectSetString(0, BRT+"BAL_V", OBJPROP_TEXT, DoubleToString(bal, 2));
    ObjectSetString(0, BRT+"MG_V", OBJPROP_TEXT, DoubleToString(daily_usc, 2));
