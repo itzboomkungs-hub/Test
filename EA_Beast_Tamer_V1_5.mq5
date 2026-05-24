@@ -195,6 +195,7 @@ bool g_infinity_mode = true;
 bool g_mobile_hedge = true;   
 bool g_double_force = true;   
 bool g_trend_filter = false;    // ตัวแปรเก็บสถานะปุ่ม Trend H1
+bool g_emergency_close = true;   // ตัวแปรเก็บสถานะปุ่มกันพอร์ตแตก
 datetime LastRecoveryTime = 0;
 
 double LastEntryPrice = 0;
@@ -850,6 +851,7 @@ void DrawUI() {
    CreateButton(BRT+"BTN_CLOSE", "ปิดทั้งหมด (CLOSE ALL)", PANEL_X+15, y, 240, 38, C'120,40,160'); y += 55;
    CreateButton(BRT+"BTN_ORDLINE", g_order_line_enabled?"เส้น: [เปิด]":"เส้น: [ปิด]", PANEL_X+PAD, y, 250, 32, g_order_line_enabled?C'155,89,182':clrSlateGray); 
 y += 38;
+   CreateButton(BRT+"BTN_EMERGENCY", g_emergency_close?"กันพอร์ตแตก: [เปิด]":"กันพอร์ตแตก: [ปิด]", PANEL_X+PAD, y, 250, 32, g_emergency_close?CLR_LOSS:clrSlateGray); y += 38;
 
    MakeRect(BRT+"DIV", PANEL_X+10, y, PANEL_W-20, 1, C'60,40,100'); y+=15;
    MakeLabel(BRT+"BAL_L", PANEL_X+PAD, y, "ยอดเงินคงเหลือ:", "Tahoma", 9, CLR_LABEL);
@@ -896,6 +898,7 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
       if(sparam == BRT+"BTN_SELL") { trade.SetExpertMagicNumber(Inp_Magic); trade.Sell(SafeLot(Inp_BaseLot)); if(!g_trend_filter && g_double_force) trade.Buy(SafeLot(Inp_BaseLot)); lastTradeTime = TimeCurrent(); }
       if(sparam == BRT+"BTN_CLOSE") { CloseAll(); last_basket_close = TimeCurrent(); }
       if(sparam == BRT+"BTN_ORDLINE") { g_order_line_enabled = !g_order_line_enabled; ObjectSetString(0, sparam, OBJPROP_TEXT, g_order_line_enabled?"เส้นฉลาด: [เปิด]":"เส้นฉลาด: [ปิด]"); ObjectSetInteger(0, sparam, OBJPROP_BGCOLOR, g_order_line_enabled?C'155,89,182':clrSlateGray); if(g_order_line_enabled) DrawOrderLines(); else DeleteOrderLines(); }
+      if(sparam == BRT+"BTN_EMERGENCY") { g_emergency_close = !g_emergency_close; ObjectSetString(0, sparam, OBJPROP_TEXT, g_emergency_close?"กันพอร์ตแตก: [เปิด]":"กันพอร์ตแตก: [ปิด]"); ObjectSetInteger(0, sparam, OBJPROP_BGCOLOR, g_emergency_close?CLR_LOSS:clrSlateGray); }
       ObjectSetInteger(0, sparam, OBJPROP_STATE, false); ChartRedraw();
    }
 }
@@ -1772,7 +1775,7 @@ void SmartPullRecovery(double divider)
    double total_thb = (total_profit_usd / divider) * 32.0;
 
    // === 2. กันพอร์ตแตก (Emergency Close) ===
-   if(Inp_Use_Emergency_Close && total_thb <= Inp_Emergency_DD_THB)
+   if(Inp_Use_Emergency_Close && g_emergency_close && total_thb <= Inp_Emergency_DD_THB)
    {
       Print("Emergency Close! DD=", DoubleToString(total_thb, 2), " THB");
       CloseAll();
