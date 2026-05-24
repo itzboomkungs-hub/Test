@@ -486,11 +486,11 @@ void OnTick() {
 
    if(Inp_Clear_Winner_Side && !is_processing) {
       if(b_t > 0 && b_p_thb >= Inp_Min_Profit_THB) {
-         if(Inp_Nuke_Board) CloseAll(); else CloseSide(POSITION_TYPE_BUY); 
+         if(Inp_Nuke_Board && total_thb >= 0) CloseAll(); else CloseSide(POSITION_TYPE_BUY); 
          last_basket_close = TimeCurrent(); return; 
       }
       if(s_t > 0 && s_p_thb >= Inp_Min_Profit_THB) {
-         if(Inp_Nuke_Board) CloseAll(); else CloseSide(POSITION_TYPE_SELL); 
+         if(Inp_Nuke_Board && total_thb >= 0) CloseAll(); else CloseSide(POSITION_TYPE_SELL); 
          last_basket_close = TimeCurrent(); return; 
       }
    }
@@ -521,8 +521,15 @@ void OnTick() {
    CleanupTinyPositions();
 
    double velocity = MathAbs(iClose(_Symbol, PERIOD_M1, 0) - iOpen(_Symbol, PERIOD_M1, 0)) / _Point;
-   if(Inp_Use_AI_Exit && total_thb > (Inp_Target_THB * 0.5) && velocity < 5.0 && (b_t > 0 || s_t > 0)) { 
-      CloseAll(); last_basket_close = TimeCurrent(); return; 
+   if(Inp_Use_AI_Exit && total_thb > (Inp_Target_THB * 0.5) && velocity < 5.0 && (b_t > 0 || s_t > 0)) {
+      // ปิดเฉพาะเมื่อไม่มีฝั่งไหนขาดทุนหนัก (กัน cut loss)
+      if(b_p_thb >= 0 && s_p_thb >= 0) {
+         CloseAll(); last_basket_close = TimeCurrent(); return;
+      } else if(b_t > 0 && s_t == 0 && b_p_thb > 0) {
+         CloseSide(POSITION_TYPE_BUY); last_basket_close = TimeCurrent(); return;
+      } else if(s_t > 0 && b_t == 0 && s_p_thb > 0) {
+         CloseSide(POSITION_TYPE_SELL); last_basket_close = TimeCurrent(); return;
+      }
    }
    
 
@@ -611,6 +618,13 @@ if(!is_processing)
       }
       UpdateUI(bal, 0, m_lv, daily_p_usc, b_t, s_t, atr_v[0], ma_v[0]);
       UpdateRightPanel();
+
+      // อัปเดตตารางย้อนหลัง 7 วัน (ทุก 60 วินาที)
+      static datetime last_hist_update = 0;
+      if(TimeCurrent() - last_hist_update >= 60) {
+         UpdateHistoryPanel();
+         last_hist_update = TimeCurrent();
+      }
 
       if((m_lv > Inp_Min_Margin || m_lv == 0) && (datetime)TimeCurrent() - lastTradeTime > 3) {
          if(b_t > 0 && b_t < 20) SmartCheckRecovery(POSITION_TYPE_BUY, b_t, atr_v[0]);
@@ -928,6 +942,7 @@ y += 38;
 
    // แสดง UI ฝั่งขวา
    DrawRightPanel();
+   DrawHistoryPanel();
 }
 
 
@@ -1078,6 +1093,127 @@ void UpdateRightPanel()
    string mg_txt = (margin_lv > 0) ? DoubleToString(margin_lv, 0) + "%" : "ไม่มีไม้";
    ObjectSetString(0, P+"MG_V", OBJPROP_TEXT, mg_txt);
    ObjectSetInteger(0, P+"MG_V", OBJPROP_COLOR, margin_lv > 500 ? CLR_PROFIT : (margin_lv > 200 ? CLR_GOLD : CLR_LOSS));
+
+   ChartRedraw();
+}
+
+//+------------------------------------------------------------------+
+//| DrawHistoryPanel - ตารางกำไร/ขาดทุนย้อนหลัง 7 วัน (มุมขวาล่าง)  |
+//+------------------------------------------------------------------+
+void DrawHistoryPanel()
+{
+   string H = BRT+"HP_";
+   int chart_w = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
+   int chart_h = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
+   int pw = 230;
+   int ph = 220;
+   int px = chart_w - pw - 15;
+   int py = chart_h - ph - 15;
+   int row = 22;
+
+   // พื้นหลัง
+   MakeRect(H+"BG", px, py, pw, ph, C'20,12,35');
+   ObjectSetInteger(0, H+"BG", OBJPROP_BORDER_COLOR, C'80,50,120');
+   ObjectSetInteger(0, H+"BG", OBJPROP_ZORDER, 0);
+
+   // Header
+   MakeRect(H+"HDR", px, py, pw, 28, C'75,40,110');
+   ObjectSetInteger(0, H+"HDR", OBJPROP_ZORDER, 1);
+   MakeLabel(H+"TITLE", px+10, py+5, "📅 ย้อนหลัง 7 วัน", "Segoe UI", 9, CLR_GOLD);
+
+   int y = py + 34;
+
+   // Column Headers
+   MakeLabel(H+"COL_D", px+8,   y, "วัน", "Tahoma", 8, C'140,120,170');
+   MakeLabel(H+"COL_P", px+55,  y, "กำไร(฿)", "Tahoma", 8, C'140,120,170');
+   MakeLabel(H+"COL_L", px+120, y, "ขาดทุน(฿)", "Tahoma", 8, C'140,120,170');
+   MakeLabel(H+"COL_N", px+190, y, "สุทธิ", "Tahoma", 8, C'140,120,170');
+   y += 18;
+   MakeRect(H+"DIV0", px+5, y, pw-10, 1, C'60,40,90');
+   y += 4;
+
+   // 7 rows for each day
+   for(int d = 0; d < 7; d++)
+   {
+      string ds = IntegerToString(d);
+      MakeLabel(H+"D"+ds, px+8,   y, "-", "Tahoma", 8, C'160,140,190');
+      MakeLabel(H+"P"+ds, px+55,  y, "0", "Tahoma", 8, CLR_PROFIT);
+      MakeLabel(H+"L"+ds, px+120, y, "0", "Tahoma", 8, CLR_LOSS);
+      MakeLabel(H+"N"+ds, px+190, y, "0", "Tahoma", 8, CLR_VALUE);
+      y += row;
+   }
+
+   ChartRedraw();
+}
+
+//+------------------------------------------------------------------+
+//| UpdateHistoryPanel - อัปเดตข้อมูลย้อนหลัง 7 วัน                  |
+//+------------------------------------------------------------------+
+void UpdateHistoryPanel()
+{
+   string H = BRT+"HP_";
+   string acc_curr = AccountInfoString(ACCOUNT_CURRENCY);
+   double divider = (StringFind(acc_curr, "USC") >= 0 || StringFind(acc_curr, "Cent") >= 0) ? 100.0 : 1.0;
+
+   MqlDateTime now_dt;
+   TimeCurrent(now_dt);
+
+   for(int d = 0; d < 7; d++)
+   {
+      // คำนวณวันที่
+      datetime day_start = TimeCurrent() - (d * 86400);
+      MqlDateTime dt;
+      TimeToStruct(day_start, dt);
+      dt.hour = 0; dt.min = 0; dt.sec = 0;
+      datetime from_time = StructToTime(dt);
+      datetime to_time   = from_time + 86400;
+
+      // ดึงประวัติ
+      HistorySelect(from_time, to_time);
+      int deals = HistoryDealsTotal();
+
+      double day_profit = 0;
+      double day_loss   = 0;
+
+      for(int i = 0; i < deals; i++)
+      {
+         ulong deal_ticket = HistoryDealGetTicket(i);
+         if(deal_ticket == 0) continue;
+         if(HistoryDealGetString(deal_ticket, DEAL_SYMBOL) != _Symbol) continue;
+
+         long deal_entry = HistoryDealGetInteger(deal_ticket, DEAL_ENTRY);
+         if(deal_entry != DEAL_ENTRY_OUT && deal_entry != DEAL_ENTRY_INOUT) continue;
+
+         double p = HistoryDealGetDouble(deal_ticket, DEAL_PROFIT)
+                  + HistoryDealGetDouble(deal_ticket, DEAL_SWAP)
+                  + HistoryDealGetDouble(deal_ticket, DEAL_COMMISSION);
+
+         if(p >= 0) day_profit += p;
+         else       day_loss   += p;
+      }
+
+      double day_net = day_profit + day_loss;
+      double profit_thb = (day_profit / divider) * 32.0;
+      double loss_thb   = (day_loss / divider) * 32.0;
+      double net_thb    = (day_net / divider) * 32.0;
+
+      // ชื่อวัน
+      string day_names[] = {"อา","จ","อ","พ","พฤ","ศ","ส"};
+      string day_label = IntegerToString(dt.day) + "/" + IntegerToString(dt.mon)
+                        + " " + day_names[dt.day_of_week];
+
+      string ds = IntegerToString(d);
+      ObjectSetString(0, H+"D"+ds, OBJPROP_TEXT, day_label);
+
+      ObjectSetString(0, H+"P"+ds, OBJPROP_TEXT, DoubleToString(profit_thb, 0));
+      ObjectSetInteger(0, H+"P"+ds, OBJPROP_COLOR, CLR_PROFIT);
+
+      ObjectSetString(0, H+"L"+ds, OBJPROP_TEXT, DoubleToString(loss_thb, 0));
+      ObjectSetInteger(0, H+"L"+ds, OBJPROP_COLOR, CLR_LOSS);
+
+      ObjectSetString(0, H+"N"+ds, OBJPROP_TEXT, DoubleToString(net_thb, 0));
+      ObjectSetInteger(0, H+"N"+ds, OBJPROP_COLOR, net_thb >= 0 ? CLR_PROFIT : CLR_LOSS);
+   }
 
    ChartRedraw();
 }
