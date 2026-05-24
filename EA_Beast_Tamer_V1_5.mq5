@@ -193,14 +193,6 @@ input double Inp_Pull_Close_THB      = 2.0;     // กำไรสุทธิ�
 input bool   Inp_Use_Emergency_Close = true;    // เปิดระบบกันพอร์ตแตก (Emergency)
 input double Inp_Emergency_DD_THB    = -500.0;  // ขาดทุนรวมสูงสุดก่อนปิดหมด (บาท)
 
-// --- [กลุ่มที่ 14: ระบบล็อค Hedge & หยุดเปิดไม้] ---
-input group "🔒 ระบบล็อค Hedge อัตโนมัติ & หยุดเปิดไม้"
-input bool   Inp_Use_Auto_Hedge      = true;    // เปิดระบบล็อค Hedge อัตโนมัติ
-input double Inp_Hedge_DD_Percent    = 30.0;    // Drawdown % ที่เริ่มล็อค Hedge
-input int    Inp_Hedge_Magic         = 555555;  // Magic Number ไม้ล็อค Hedge
-input bool   Inp_Use_DD_Stop_Grid    = true;    // หยุดเปิดไม้เพิ่มเมื่อ Drawdown เกิน
-input double Inp_DD_Stop_Percent     = 25.0;    // Drawdown % ที่หยุดเปิดไม้เพิ่ม
-input int    Inp_Max_One_Side        = 8;       // จำนวนไม้สูงสุดต่อฝั่ง (BUY หรือ SELL)
 
 
 // --- Global Variables ---
@@ -213,10 +205,6 @@ bool g_mobile_hedge = true;
 bool g_double_force = true;   
 bool g_trend_filter = false;    // ตัวแปรเก็บสถานะปุ่ม Trend H1
 datetime LastRecoveryTime = 0;
-
-// --- ตัวแปรระบบล็อค Hedge ---
-bool g_hedge_buy_locked = false;
-bool g_hedge_sell_locked = false;
 
 double LastEntryPrice = 0;
 
@@ -601,24 +589,11 @@ if(!is_processing)
   // --- ระบบดึงกลับเมื่อเทรนด์กลับตัว & กันพอร์ตแตก ---
   if(!is_processing)
    SmartPullRecovery(divider);
-
-  // --- ระบบล็อค Hedge อัตโนมัติ ---
-  if(!is_processing)
-   AutoHedgeLock();
-  if(!is_processing)
-   CheckHedgeUnlock();
 }
-
-
-   
 //--- Functions ---
 void SmartCheckRecovery(ENUM_POSITION_TYPE t, int tot, double atr) {
    if(Inp_Use_Max_Main && tot >= Inp_Max_Main_Orders) return;
 
-   // หยุดเปิดไม้เพิ่มเมื่อ Drawdown เกินหรือไม้เกินจำนวนสูงสุดต่อฝั่ง
-   if(Inp_Use_DD_Stop_Grid && GetDrawdownPercent() >= Inp_DD_Stop_Percent) return;
-   if(tot >= Inp_Max_One_Side) return;
-   
    // ถ้าเปิดกรองเทรนด์ จะไม่แก้ไม้ฝั่งที่สวนเทรนด์
    if(g_trend_filter) {
       double ma_v[]; ArraySetAsSeries(ma_v, true);
@@ -1048,13 +1023,11 @@ void CloseSide(ENUM_POSITION_TYPE t) { for(int i=PositionsTotal()-1; i>=0; i--) 
 void CloseAll() { 
    for(int i=PositionsTotal()-1; i>=0; i--) {
       ulong ticket = PositionGetTicket(i);
-      if(PositionSelectByTicket(ticket) && (PositionGetInteger(POSITION_MAGIC) == Inp_Magic || PositionGetInteger(POSITION_MAGIC) == Inp_Support_Magic || PositionGetInteger(POSITION_MAGIC) == Inp_Rescue_Magic || PositionGetInteger(POSITION_MAGIC) == Inp_Hedge_Magic)) trade.PositionClose(ticket);
+      if(PositionSelectByTicket(ticket) && (PositionGetInteger(POSITION_MAGIC) == Inp_Magic || PositionGetInteger(POSITION_MAGIC) == Inp_Support_Magic || PositionGetInteger(POSITION_MAGIC) == Inp_Rescue_Magic)) trade.PositionClose(ticket);
    }
    g_rescue_active = false;
    g_last_buy_rescue_lot = 0;
    g_last_sell_rescue_lot = 0;
-   g_hedge_buy_locked = false;
-   g_hedge_sell_locked = false;
 }
 
 void MakeRect(string n, int x, int y, int xs, int ys, color c) { ObjectCreate(0,n,OBJ_RECTANGLE_LABEL,0,0,0); ObjectSetInteger(0,n,OBJPROP_XDISTANCE,x); ObjectSetInteger(0,n,OBJPROP_YDISTANCE,y); ObjectSetInteger(0,n,OBJPROP_XSIZE,xs); ObjectSetInteger(0,n,OBJPROP_YSIZE,ys); ObjectSetInteger(0,n,OBJPROP_BGCOLOR,c); ObjectSetInteger(0,n,OBJPROP_BORDER_TYPE,BORDER_FLAT); ObjectSetInteger(0,n,OBJPROP_ZORDER,0); }
@@ -1450,7 +1423,7 @@ void CloseMainAndRescue() {
          && PositionGetString(POSITION_SYMBOL) == _Symbol) {
          long magic = PositionGetInteger(POSITION_MAGIC);
 
-         if(magic == Inp_Magic || magic == Inp_Rescue_Magic || magic == Inp_Hedge_Magic) {
+         if(magic == Inp_Magic || magic == Inp_Rescue_Magic) {
             trade.PositionClose(ticket);
          }
       }
@@ -1459,8 +1432,6 @@ void CloseMainAndRescue() {
    g_rescue_active = false;
    g_last_buy_rescue_lot = 0;
    g_last_sell_rescue_lot = 0;
-   g_hedge_buy_locked = false;
-   g_hedge_sell_locked = false;
    is_processing = false;
    last_basket_close = TimeCurrent();
 }
@@ -1795,7 +1766,7 @@ void ManageAllPositionsSL()
       long magic = PositionGetInteger(POSITION_MAGIC);
       if(magic != Inp_Magic && magic != Inp_Rescue_Magic &&
          magic != Inp_Support_Magic && magic != MagicNumber &&
-         magic != Inp_Hedge_Magic && magic != 0) continue;
+         magic != 0) continue;
 
       ENUM_POSITION_TYPE type = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
       double op = PositionGetDouble(POSITION_PRICE_OPEN);
@@ -1848,119 +1819,6 @@ void ManageAllPositionsSL()
       }
    }
 }
-
-
-//+------------------------------------------------------------------+
-//| GetDrawdownPercent - คำนวณ Drawdown %                            |
-//+------------------------------------------------------------------+
-double GetDrawdownPercent()
-{
-   double balance = AccountInfoDouble(ACCOUNT_BALANCE);
-   double equity = AccountInfoDouble(ACCOUNT_EQUITY);
-   if(balance <= 0) return 0;
-   return ((balance - equity) / balance) * 100.0;
-}
-
-//+------------------------------------------------------------------+
-//| AutoHedgeLock - ล็อค Hedge อัตโนมัติเมื่อ Drawdown เกิน          |
-//+------------------------------------------------------------------+
-void AutoHedgeLock()
-{
-   if(!Inp_Use_Auto_Hedge) return;
-
-   double dd_pct = GetDrawdownPercent();
-   if(dd_pct < Inp_Hedge_DD_Percent) return;
-
-   double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-
-   double buy_vol = 0, sell_vol = 0;
-   double hedge_buy_vol = 0, hedge_sell_vol = 0;
-
-   for(int i = PositionsTotal()-1; i >= 0; i--)
-   {
-      ulong ticket = PositionGetTicket(i);
-      if(!PositionSelectByTicket(ticket)) continue;
-      if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
-
-      long magic = PositionGetInteger(POSITION_MAGIC);
-      ENUM_POSITION_TYPE type = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
-      double vol = PositionGetDouble(POSITION_VOLUME);
-
-      if(magic == Inp_Hedge_Magic)
-      {
-         if(type == POSITION_TYPE_BUY) hedge_buy_vol += vol;
-         else hedge_sell_vol += vol;
-      }
-      else if(magic == Inp_Magic || magic == Inp_Rescue_Magic ||
-              magic == Inp_Support_Magic || magic == MagicNumber || magic == 0)
-      {
-         if(type == POSITION_TYPE_BUY) buy_vol += vol;
-         else sell_vol += vol;
-      }
-   }
-
-   // SELL ค้างหนัก (sell_vol > buy_vol) → เปิด BUY ล็อค
-   if(sell_vol > buy_vol + hedge_buy_vol && !g_hedge_buy_locked)
-   {
-      double need_vol = sell_vol - buy_vol - hedge_buy_vol;
-      need_vol = SafeLot(need_vol);
-      if(need_vol > 0)
-      {
-         trade.SetExpertMagicNumber(Inp_Hedge_Magic);
-         if(trade.Buy(need_vol, _Symbol, 0, 0, 0, "Auto Hedge Lock Buy"))
-         {
-            g_hedge_buy_locked = true;
-            Print("Hedge Lock BUY | Vol=", DoubleToString(need_vol,2),
-                  " DD=", DoubleToString(dd_pct,1), "%");
-         }
-      }
-   }
-
-   // BUY ค้างหนัก (buy_vol > sell_vol) → เปิด SELL ล็อค
-   if(buy_vol > sell_vol + hedge_sell_vol && !g_hedge_sell_locked)
-   {
-      double need_vol = buy_vol - sell_vol - hedge_sell_vol;
-      need_vol = SafeLot(need_vol);
-      if(need_vol > 0)
-      {
-         trade.SetExpertMagicNumber(Inp_Hedge_Magic);
-         if(trade.Sell(need_vol, _Symbol, 0, 0, 0, "Auto Hedge Lock Sell"))
-         {
-            g_hedge_sell_locked = true;
-            Print("Hedge Lock SELL | Vol=", DoubleToString(need_vol,2),
-                  " DD=", DoubleToString(dd_pct,1), "%");
-         }
-      }
-   }
-}
-
-//+------------------------------------------------------------------+
-//| CheckHedgeUnlock - ปลดล็อค Hedge เมื่อ Drawdown ลดลง            |
-//+------------------------------------------------------------------+
-void CheckHedgeUnlock()
-{
-   if(!Inp_Use_Auto_Hedge) return;
-   if(!g_hedge_buy_locked && !g_hedge_sell_locked) return;
-
-   double dd_pct = GetDrawdownPercent();
-
-   // ถ้า DD ลดลงต่ำกว่าครึ่งของ trigger → ปลด hedge
-   if(dd_pct < Inp_Hedge_DD_Percent * 0.5)
-   {
-      for(int i = PositionsTotal()-1; i >= 0; i--)
-      {
-         ulong ticket = PositionGetTicket(i);
-         if(!PositionSelectByTicket(ticket)) continue;
-         if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
-         if(PositionGetInteger(POSITION_MAGIC) == Inp_Hedge_Magic)
-            trade.PositionClose(ticket);
-      }
-      g_hedge_buy_locked = false;
-      g_hedge_sell_locked = false;
-      Print("Hedge Unlocked! DD=", DoubleToString(dd_pct,1), "%");
-   }
-}
 //+------------------------------------------------------------------+
 //| SmartPullRecovery - หักลบปิดรวบ & กันพอร์ตแตก                    |
 //| เอากำไรจากไม้ข้างบน (กำไร) มาหักลบไม้ข้างล่าง (ขาดทุน)          |
@@ -1983,7 +1841,7 @@ void SmartPullRecovery(double divider)
       long magic = PositionGetInteger(POSITION_MAGIC);
       if(magic != Inp_Magic && magic != Inp_Rescue_Magic &&
          magic != Inp_Support_Magic && magic != MagicNumber &&
-         magic != Inp_Hedge_Magic && magic != 0) continue;
+         magic != 0) continue;
 
       total_profit_usd += PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
       total_positions++;
@@ -2026,7 +1884,7 @@ void SmartPullRecovery(double divider)
       long magic = PositionGetInteger(POSITION_MAGIC);
       if(magic != Inp_Magic && magic != Inp_Rescue_Magic &&
          magic != Inp_Support_Magic && magic != MagicNumber &&
-         magic != Inp_Hedge_Magic && magic != 0) continue;
+         magic != 0) continue;
 
       double p = PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
       if(p > best_p) { best_p = p; best_tk = ticket; }
