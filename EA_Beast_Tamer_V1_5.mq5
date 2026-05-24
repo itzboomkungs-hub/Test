@@ -1094,7 +1094,7 @@ void TryCrossSurvivorClear(double divider) {
 }
 // ----------------------------------------
 
-void CloseSide(ENUM_POSITION_TYPE t) { for(int i=PositionsTotal()-1; i>=0; i--) { ulong ticket = PositionGetTicket(i); if(PositionSelectByTicket(ticket) && PositionGetString(POSITION_SYMBOL) == _Symbol && PositionGetInteger(POSITION_TYPE) == t && PositionGetInteger(POSITION_MAGIC) == Inp_Magic || PositionGetInteger(POSITION_MAGIC) == Inp_Rescue_Magic || PositionGetInteger(POSITION_MAGIC) == Inp_Support_Magic || PositionGetInteger(POSITION_MAGIC) == Inp_Pull_Magic) trade.PositionClose(ticket); } }
+void CloseSide(ENUM_POSITION_TYPE t) { for(int i=PositionsTotal()-1; i>=0; i--) { ulong ticket = PositionGetTicket(i); if(PositionSelectByTicket(ticket) && PositionGetString(POSITION_SYMBOL) == _Symbol && PositionGetInteger(POSITION_TYPE) == t && (PositionGetInteger(POSITION_MAGIC) == Inp_Magic || PositionGetInteger(POSITION_MAGIC) == Inp_Rescue_Magic || PositionGetInteger(POSITION_MAGIC) == Inp_Support_Magic || PositionGetInteger(POSITION_MAGIC) == Inp_Pull_Magic)) trade.PositionClose(ticket); } }
 
 void CloseAll() { 
    for(int i=PositionsTotal()-1; i>=0; i--) {
