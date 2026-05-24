@@ -186,12 +186,10 @@ input color  Inp_OL_Buy_Color      = clrBlue;  //สีBUY
 input color  Inp_OL_Sell_Color     = clrRed;  //สีSELL
 input int    Inp_OL_Width          = 2;
 
-// --- [กลุ่มที่ 13: ระบบหักลบปิดรวบ & กันพอร์ตแตก] ---
-input group "🔄 ระบบหักลบปิดรวบ & กันพอร์ตแตก (Offset Close)"
+// --- [กลุ่มที่ 13: ระบบหักลบปิดรวบ] ---
+input group "🔄 ระบบหักลบปิดรวบ (Offset Close)"
 input bool   Inp_Use_Pull_Recovery    = true;    // เปิดระบบหักลบปิดรวบ
 input double Inp_Pull_Close_THB      = 2.0;     // กำไรสุทธิขั้นต่ำ หักลบปิดรวบ (บาท)
-input bool   Inp_Use_Emergency_Close = true;    // เปิดระบบกันพอร์ตแตก (Emergency)
-input double Inp_Emergency_DD_THB    = -500.0;  // ขาดทุนรวมสูงสุดก่อนปิดหมด (บาท)
 
 // --- [กลุ่มที่ 14: ระบบดึงไม้ดอย (Pull Recovery)] ---
 input group "🔄 ระบบดึงไม้ดอย (Pull Recovery)"
@@ -1953,7 +1951,6 @@ void PullStuckPositions()
 //+------------------------------------------------------------------+
 void SmartPullRecovery(double divider)
 {
-   if(!Inp_Use_Pull_Recovery && !Inp_Use_Emergency_Close) return;
 
    // === 1. คำนวณ P&L รวมทุกไม้ ===
    double total_profit_usd = 0;
@@ -1978,16 +1975,6 @@ void SmartPullRecovery(double divider)
    if(total_positions == 0) return;
 
    double total_thb = (total_profit_usd / divider) * 32.0;
-
-   // === 2. กันพอร์ตแตก (Emergency Close) ===
-   if(Inp_Use_Emergency_Close && total_thb <= Inp_Emergency_DD_THB)
-   {
-      Print("Emergency Close! DD=", DoubleToString(total_thb, 2), " THB");
-      CloseAll();
-      last_basket_close = TimeCurrent();
-      return;
-   }
-
    if(!Inp_Use_Pull_Recovery) return;
 
    // === 3. ปิดรวบทุกไม้เมื่อกำไรสุทธิรวมเป็นบวก ===
