@@ -123,6 +123,14 @@ input int    Inp_Trail_TP_Distance   = 200;     // TP ห่างจากร�
 input int    Inp_Trail_TP_Step       = 50;      // ขยับ TP ทีละกี่จุด
 input int    Inp_Trail_TP_Min_Profit = 50;      // กำไรขั้นต่ำที่ต้องล็อค (จุด)
 
+// --- [กลุ่มที่ 8.6: ระบบ SL กันหน้าทุกไม้] ---
+input group "🛡️ SL กันหน้าทุกไม้ (Trailing SL ทุกไม้)"
+input bool   Inp_Use_All_SL          = true;    // เปิดระบบ SL กันหน้าทุกไม้
+input int    Inp_All_SL_Trigger      = 300;     // เริ่มวาง SL เมื่อกำไรกี่จุด
+input int    Inp_All_SL_Lock         = 100;     // SL ล็อคกำไรกี่จุดจากราคาเปิด
+input int    Inp_All_SL_Trail_Dist   = 250;     // SL ห่างจากราคาปัจจุบัน (ขณะ Trail)
+input int    Inp_All_SL_Step         = 50;      // ขยับ SL ทีละกี่จุด
+
 // --- [กลุ่มที่ 9: ระบบ การตั้งค่าระยะแก้ไม้] ---
 input group "📐 การตั้งค่าระยะแก้ไม้"
 input double Inp_Step_Base       = 600.0;  // ระยะห่างเริ่มต้น
@@ -468,6 +476,7 @@ void OnTick() {
 
    // TP ทุกไม้ & Trailing TP (ล็อคกำไร)
    ManageAllPositionsTP();
+   ManageAllPositionsSL();
 
    double velocity = MathAbs(iClose(_Symbol, PERIOD_M1, 0) - iOpen(_Symbol, PERIOD_M1, 0)) / _Point;
    if(Inp_Use_AI_Exit && total_thb > (Inp_Target_THB * 0.5) && velocity < 5.0 && (b_t > 0 || s_t > 0)) { 
@@ -1734,6 +1743,78 @@ void ManageAllPositionsTP()
 
                if(new_tp < tp - Inp_Trail_TP_Step * _Point && new_tp > 0)
                   trade.PositionModify(ticket, sl, new_tp);
+            }
+         }
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| ManageAllPositionsSL - SL กันหน้าทุกไม้ (Trailing SL ทุกไม้)     |
+//+------------------------------------------------------------------+
+void ManageAllPositionsSL()
+{
+   if(!Inp_Use_All_SL) return;
+
+   double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+
+   for(int i = PositionsTotal()-1; i >= 0; i--)
+   {
+      ulong ticket = PositionGetTicket(i);
+      if(!PositionSelectByTicket(ticket)) continue;
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+
+      long magic = PositionGetInteger(POSITION_MAGIC);
+      if(magic != Inp_Magic && magic != Inp_Rescue_Magic &&
+         magic != Inp_Support_Magic && magic != MagicNumber && magic != 0) continue;
+
+      ENUM_POSITION_TYPE type = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+      double op = PositionGetDouble(POSITION_PRICE_OPEN);
+      double sl = PositionGetDouble(POSITION_SL);
+      double tp = PositionGetDouble(POSITION_TP);
+
+      if(type == POSITION_TYPE_BUY)
+      {
+         double profit_pts = (bid - op) / _Point;
+
+         if(profit_pts >= Inp_All_SL_Trigger)
+         {
+            double lock_sl = NormalizeDouble(op + Inp_All_SL_Lock * _Point, _Digits);
+
+            if(sl == 0 || sl < op)
+            {
+               trade.PositionModify(ticket, lock_sl, tp);
+            }
+            else
+            {
+               double trail_sl = NormalizeDouble(bid - Inp_All_SL_Trail_Dist * _Point, _Digits);
+               trail_sl = MathMax(trail_sl, lock_sl);
+
+               if(trail_sl > sl + Inp_All_SL_Step * _Point)
+                  trade.PositionModify(ticket, trail_sl, tp);
+            }
+         }
+      }
+      else // SELL
+      {
+         double profit_pts = (op - ask) / _Point;
+
+         if(profit_pts >= Inp_All_SL_Trigger)
+         {
+            double lock_sl = NormalizeDouble(op - Inp_All_SL_Lock * _Point, _Digits);
+
+            if(sl == 0 || sl > op)
+            {
+               trade.PositionModify(ticket, lock_sl, tp);
+            }
+            else
+            {
+               double trail_sl = NormalizeDouble(ask + Inp_All_SL_Trail_Dist * _Point, _Digits);
+               trail_sl = MathMin(trail_sl, lock_sl);
+
+               if(trail_sl < sl - Inp_All_SL_Step * _Point && trail_sl > 0)
+                  trade.PositionModify(ticket, trail_sl, tp);
             }
          }
       }
