@@ -516,6 +516,9 @@ void OnTick() {
    // TP แบ่งปิด (Partial Close)
    ManagePartialClose();
 
+   // ปิดไม้ lot จิ๋วที่ค้างจาก Partial Close
+   CleanupTinyPositions();
+
    double velocity = MathAbs(iClose(_Symbol, PERIOD_M1, 0) - iOpen(_Symbol, PERIOD_M1, 0)) / _Point;
    if(Inp_Use_AI_Exit && total_thb > (Inp_Target_THB * 0.5) && velocity < 5.0 && (b_t > 0 || s_t > 0)) { 
       CloseAll(); last_basket_close = TimeCurrent(); return; 
@@ -1951,16 +1954,8 @@ void ManagePartialClose()
       double vol = PositionGetDouble(POSITION_VOLUME);
       string comment = PositionGetString(POSITION_COMMENT);
 
-      // ถ้าปิดบางส่วนไปแล้ว (Partial) → ข้ามไม่ partial ซ้ำ
-      if(StringFind(comment, "Partial") >= 0) continue;
+      // ข้ามถ้า lot น้อยเกินไป (CleanupTinyPositions จัดการ)
       double min_lot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
-      // ถ้า lot เหลือน้อยเท่า min → ปิดทั้งหมดเลย (กัน 0.01 ค้าง)
-      if(vol <= min_lot * 1.5 && StringFind(comment, "to #") >= 0)
-      {
-         trade.PositionClose(ticket);
-         Print("Auto Close Tiny Lot | Ticket=", ticket, " Vol=", DoubleToString(vol,2));
-         continue;
-      }
       if(vol <= min_lot) continue;
 
       double profit_pts = 0;
@@ -1979,6 +1974,34 @@ void ManagePartialClose()
                   " Vol=", DoubleToString(close_vol,2),
                   " Profit=", DoubleToString(profit_pts,0), " pts");
          }
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| CleanupTinyPositions - ปิดไม้ lot จิ๋วที่ค้างจาก Partial Close    |
+//+------------------------------------------------------------------+
+void CleanupTinyPositions()
+{
+   double min_lot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+
+   for(int i = PositionsTotal()-1; i >= 0; i--)
+   {
+      ulong ticket = PositionGetTicket(i);
+      if(!PositionSelectByTicket(ticket)) continue;
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+
+      long magic = PositionGetInteger(POSITION_MAGIC);
+      if(magic != Inp_Magic && magic != Inp_Rescue_Magic &&
+         magic != Inp_Support_Magic && magic != MagicNumber &&
+         magic != Inp_Pull_Magic && magic != 0) continue;
+
+      double vol = PositionGetDouble(POSITION_VOLUME);
+      // ปิดไม้ที่ lot เท่ากับ min lot (0.01) ทันที — เป็นเศษจาก Partial Close
+      if(vol <= min_lot)
+      {
+         trade.PositionClose(ticket);
+         Print("Cleanup Tiny | Ticket=", ticket, " Vol=", DoubleToString(vol,2));
       }
    }
 }
