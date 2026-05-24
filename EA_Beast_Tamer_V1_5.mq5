@@ -389,6 +389,7 @@ void OnTick() {
          if(Inp_Close_And_Stop) { CloseAll(); g_auto_mode = false; }
          g_target_reached_today = true;
          Alert("เป้าแตก! กำไรวันนี้ครบ "+(string)Inp_Daily_Target_USC+" USC แล้วนาย");
+         ShowBigMessage("🎯 ถึงเป้าหมายแล้ว!", clrLime);
       }
       UpdateUI(AccountInfoDouble(ACCOUNT_BALANCE), 0, AccountInfoDouble(ACCOUNT_MARGIN_LEVEL), daily_p_usc, 0, 0, 0, 0);
       return; 
@@ -401,8 +402,11 @@ void OnTick() {
 
    if(Inp_Use_Time_Filter && !IsThaiTimeWindow()) {
       UpdateUI(AccountInfoDouble(ACCOUNT_BALANCE), 0, AccountInfoDouble(ACCOUNT_MARGIN_LEVEL), daily_p_usc, 0, 0, 0, 0);
+      ShowBigMessage("⏰ ยังไม่ถึงเวลาเทรด", clrOrangeRed);
       return; 
    }
+   // ซ่อนข้อความตัวใหญ่เมื่ออยู่ในเวลาเทรด
+   HideBigMessage();
 
    if(g_mobile_hedge || g_double_force) CheckMobileHedge();
 
@@ -584,7 +588,7 @@ if(!is_processing)
             bool is_uptrend = (iClose(_Symbol, PERIOD_H1, 0) > ma_v[0]);  
               //bool is_uptrend = (iClose(_Symbol, PERIOD_H1, 0) > ma_v[0]);
 
-               if(!IsInTradingSession()) trigger = false;
+               if(!IsInTradingSession()) { trigger = false; ShowBigMessage("⏰ ยังไม่ถึงเวลาเทรด", clrOrangeRed); }
             if(trigger) {
                trade.SetExpertMagicNumber(Inp_Magic);
                if(g_trend_filter) {
@@ -610,8 +614,8 @@ if(!is_processing)
    }
 
    if(Inp_Exit_Mode == Money_Target) {
-   if(b_p_thb >= Inp_Target_THB && b_t > 0) { CloseSide(POSITION_TYPE_BUY); last_basket_close = TimeCurrent(); UpdateConsecRecord(true); }
-   if(s_p_thb >= Inp_Target_THB && s_t > 0) { CloseSide(POSITION_TYPE_SELL); last_basket_close = TimeCurrent(); UpdateConsecRecord(true); }
+   if(b_p_thb >= Inp_Target_THB && b_t > 0) { CloseSide(POSITION_TYPE_BUY); last_basket_close = TimeCurrent(); UpdateConsecRecord(true); ShowBigMessage("🎯 ถึงเป้าหมาย BUY แล้ว!", clrLime); }
+   if(s_p_thb >= Inp_Target_THB && s_t > 0) { CloseSide(POSITION_TYPE_SELL); last_basket_close = TimeCurrent(); UpdateConsecRecord(true); ShowBigMessage("🎯 ถึงเป้าหมาย SELL แล้ว!", clrLime); }
   }
   // --- ตรวจสอบเส้นฉลาด ---
   if(g_order_line_enabled) CheckOrderLineHit();
@@ -1085,7 +1089,7 @@ void TryCrossSurvivorClear(double divider) {
 }
 // ----------------------------------------
 
-void CloseSide(ENUM_POSITION_TYPE t) { for(int i=PositionsTotal()-1; i>=0; i--) { ulong ticket = PositionGetTicket(i); if(PositionSelectByTicket(ticket) && PositionGetString(POSITION_SYMBOL) == _Symbol && PositionGetInteger(POSITION_TYPE) == t && PositionGetInteger(POSITION_MAGIC) == Inp_Magic) trade.PositionClose(ticket); } }
+void CloseSide(ENUM_POSITION_TYPE t) { for(int i=PositionsTotal()-1; i>=0; i--) { ulong ticket = PositionGetTicket(i); if(PositionSelectByTicket(ticket) && PositionGetString(POSITION_SYMBOL) == _Symbol && PositionGetInteger(POSITION_TYPE) == t && PositionGetInteger(POSITION_MAGIC) == Inp_Magic || PositionGetInteger(POSITION_MAGIC) == Inp_Rescue_Magic || PositionGetInteger(POSITION_MAGIC) == Inp_Support_Magic || PositionGetInteger(POSITION_MAGIC) == Inp_Pull_Magic) trade.PositionClose(ticket); } }
 
 void CloseAll() { 
    for(int i=PositionsTotal()-1; i>=0; i--) {
@@ -1844,6 +1848,43 @@ void ManageAllPositionsTP()
 }
 
 
+
+//+------------------------------------------------------------------+
+//| ShowBigMessage - แสดงข้อความตัวใหญ่กลางจอ                        |
+//+------------------------------------------------------------------+
+void ShowBigMessage(string msg, color clr)
+{
+   string name = BRT+"BIG_MSG";
+   if(ObjectFind(0, name) < 0)
+   {
+      ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
+      ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+      ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_CENTER);
+   }
+   int chart_w = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
+   int chart_h = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
+   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, chart_w / 2);
+   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, chart_h / 2);
+   ObjectSetString(0, name, OBJPROP_TEXT, msg);
+   ObjectSetString(0, name, OBJPROP_FONT, "Arial Black");
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, 28);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
+   ObjectSetInteger(0, name, OBJPROP_ZORDER, 100);
+   ChartRedraw();
+}
+
+//+------------------------------------------------------------------+
+//| HideBigMessage - ซ่อนข้อความตัวใหญ่                             |
+//+------------------------------------------------------------------+
+void HideBigMessage()
+{
+   string name = BRT+"BIG_MSG";
+   if(ObjectFind(0, name) >= 0)
+   {
+      ObjectDelete(0, name);
+      ChartRedraw();
+   }
+}
 //+------------------------------------------------------------------+
 //| IsInTradingSession - ตรวจว่าอยู่ในเวลาเทรดหรือไม่              |
 //+------------------------------------------------------------------+
@@ -1910,9 +1951,16 @@ void ManagePartialClose()
       double vol = PositionGetDouble(POSITION_VOLUME);
       string comment = PositionGetString(POSITION_COMMENT);
 
-      // ข้ามถ้าปิดบางส่วนไปแล้ว หรือ lot เหลือน้อยเกินไป
+      // ถ้าปิดบางส่วนไปแล้ว (Partial) → ข้ามไม่ partial ซ้ำ
       if(StringFind(comment, "Partial") >= 0) continue;
       double min_lot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+      // ถ้า lot เหลือน้อยเท่า min → ปิดทั้งหมดเลย (กัน 0.01 ค้าง)
+      if(vol <= min_lot * 1.5 && StringFind(comment, "to #") >= 0)
+      {
+         trade.PositionClose(ticket);
+         Print("Auto Close Tiny Lot | Ticket=", ticket, " Vol=", DoubleToString(vol,2));
+         continue;
+      }
       if(vol <= min_lot) continue;
 
       double profit_pts = 0;
