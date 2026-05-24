@@ -353,8 +353,7 @@ bool IsNewM5Bar()
 int OnInit() {
    CheckLicense(); 
    if(!is_authorized || TimeCurrent() > expire_date) {
-      ShowSeedOnChart();
-      Alert("กรุณายืนยันสิทธิ์! ซีด: " + GetSeedCode() + " ส่งให้แอดมินเพื่อขอ Key");
+      Alert("ไม่อนุญาตให้ใช้งานหรือหมดอายุ!");
       return(INIT_FAILED);
    }
 
@@ -1112,13 +1111,6 @@ void CreateButton(string n, string t, int x, int y, int xs, int ys, color c) { O
 void CleanupVisual() { ObjectsDeleteAll(0, BRT); }
 
 
-//ระบบสิทธิ์การใช้งาน (Seed-Based License)
-string GetSeedCode()
-{
-   long acc = AccountInfoInteger(ACCOUNT_LOGIN);
-   long seed = acc + 5553052547;
-   return "SEED-" + GenerateKey(seed);
-}
 
 void CheckLicense() {
    is_authorized = false;
@@ -1136,85 +1128,9 @@ void CheckLicense() {
       Print("✅ ปลดล็อคสำเร็จ!");
    } else { 
       Print("❌ Serial Key ผิด!"); 
-      Print("📋 ซีดของคุณ: ", GetSeedCode(), " — ส่งให้แอดมินเพื่อขอ Key");
    }
 }
 
-void ShowSeedOnChart()
-{
-   string seed = GetSeedCode();
-   long acc = AccountInfoInteger(ACCOUNT_LOGIN);
-   int chart_w = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
-   int chart_h = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
-   int cx = chart_w / 2;
-   int cy = chart_h / 2;
-
-   // พื้นหลัง
-   string bg = BRT+"SEED_BG";
-   ObjectCreate(0, bg, OBJ_RECTANGLE_LABEL, 0, 0, 0);
-   ObjectSetInteger(0, bg, OBJPROP_XDISTANCE, cx - 250);
-   ObjectSetInteger(0, bg, OBJPROP_YDISTANCE, cy - 80);
-   ObjectSetInteger(0, bg, OBJPROP_XSIZE, 500);
-   ObjectSetInteger(0, bg, OBJPROP_YSIZE, 160);
-   ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'30,30,30');
-   ObjectSetInteger(0, bg, OBJPROP_BORDER_TYPE, BORDER_FLAT);
-   ObjectSetInteger(0, bg, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-   ObjectSetInteger(0, bg, OBJPROP_ZORDER, 90);
-
-   // หัวข้อ
-   string title = BRT+"SEED_TITLE";
-   ObjectCreate(0, title, OBJ_LABEL, 0, 0, 0);
-   ObjectSetInteger(0, title, OBJPROP_XDISTANCE, cx);
-   ObjectSetInteger(0, title, OBJPROP_YDISTANCE, cy - 55);
-   ObjectSetString(0, title, OBJPROP_TEXT, "🔒 กรุณายืนยันสิทธิ์การใช้งาน");
-   ObjectSetString(0, title, OBJPROP_FONT, "Arial Black");
-   ObjectSetInteger(0, title, OBJPROP_FONTSIZE, 16);
-   ObjectSetInteger(0, title, OBJPROP_COLOR, clrOrangeRed);
-   ObjectSetInteger(0, title, OBJPROP_ANCHOR, ANCHOR_CENTER);
-   ObjectSetInteger(0, title, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-   ObjectSetInteger(0, title, OBJPROP_ZORDER, 91);
-
-   // ซีด
-   string seedlbl = BRT+"SEED_CODE";
-   ObjectCreate(0, seedlbl, OBJ_LABEL, 0, 0, 0);
-   ObjectSetInteger(0, seedlbl, OBJPROP_XDISTANCE, cx);
-   ObjectSetInteger(0, seedlbl, OBJPROP_YDISTANCE, cy - 15);
-   ObjectSetString(0, seedlbl, OBJPROP_TEXT, "ซีด: " + seed);
-   ObjectSetString(0, seedlbl, OBJPROP_FONT, "Consolas");
-   ObjectSetInteger(0, seedlbl, OBJPROP_FONTSIZE, 20);
-   ObjectSetInteger(0, seedlbl, OBJPROP_COLOR, clrAqua);
-   ObjectSetInteger(0, seedlbl, OBJPROP_ANCHOR, ANCHOR_CENTER);
-   ObjectSetInteger(0, seedlbl, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-   ObjectSetInteger(0, seedlbl, OBJPROP_ZORDER, 91);
-
-   // บัญชี
-   string acclbl = BRT+"SEED_ACC";
-   ObjectCreate(0, acclbl, OBJ_LABEL, 0, 0, 0);
-   ObjectSetInteger(0, acclbl, OBJPROP_XDISTANCE, cx);
-   ObjectSetInteger(0, acclbl, OBJPROP_YDISTANCE, cy + 20);
-   ObjectSetString(0, acclbl, OBJPROP_TEXT, "บัญชี: " + IntegerToString(acc));
-   ObjectSetString(0, acclbl, OBJPROP_FONT, "Arial");
-   ObjectSetInteger(0, acclbl, OBJPROP_FONTSIZE, 12);
-   ObjectSetInteger(0, acclbl, OBJPROP_COLOR, clrWhite);
-   ObjectSetInteger(0, acclbl, OBJPROP_ANCHOR, ANCHOR_CENTER);
-   ObjectSetInteger(0, acclbl, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-   ObjectSetInteger(0, acclbl, OBJPROP_ZORDER, 91);
-
-   // คำแนะนำ
-   string hint = BRT+"SEED_HINT";
-   ObjectCreate(0, hint, OBJ_LABEL, 0, 0, 0);
-   ObjectSetInteger(0, hint, OBJPROP_XDISTANCE, cx);
-   ObjectSetInteger(0, hint, OBJPROP_YDISTANCE, cy + 50);
-   ObjectSetString(0, hint, OBJPROP_TEXT, "ส่งซีดให้แอดมินเพื่อรับ Key → กรอกใน Input");
-   ObjectSetString(0, hint, OBJPROP_FONT, "Arial");
-   ObjectSetInteger(0, hint, OBJPROP_FONTSIZE, 10);
-   ObjectSetInteger(0, hint, OBJPROP_COLOR, clrGray);
-   ObjectSetInteger(0, hint, OBJPROP_ANCHOR, ANCHOR_CENTER);
-   ObjectSetInteger(0, hint, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-   ObjectSetInteger(0, hint, OBJPROP_ZORDER, 91);
-
-   ChartRedraw();
-}
 
 string GenerateKey(long code) {
    string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
