@@ -384,8 +384,13 @@ void OnDeinit(const int reason) {
 void OnTick() {
    if(!is_authorized || is_processing || TimeCurrent() > expire_date) return;
 
+   // กัน EA เริ่มรันแล้วปิดไม้ทันที — รอ 10 วินาทีก่อน
+   static datetime ea_start_time = 0;
+   if(ea_start_time == 0) ea_start_time = TimeCurrent();
+   bool is_warming_up = (TimeCurrent() - ea_start_time < 10);
+
    double daily_p_usc = GetDailyProfitUSC();
-   if(Inp_Use_Daily_Lock && daily_p_usc >= Inp_Daily_Target_USC) {
+   if(Inp_Use_Daily_Lock && daily_p_usc >= Inp_Daily_Target_USC && !is_warming_up) {
       if(!g_target_reached_today) {
          if(Inp_Close_And_Stop) { CloseAllProfitOnly(); g_auto_mode = false; }
          g_target_reached_today = true;
@@ -469,7 +474,7 @@ void OnTick() {
    double total_thb = b_p_thb + s_p_thb;
 
    // --- [เพิ่มระบบแทรก: Quick Scalp & Clear Winner Side] ---
-   if(Inp_Quick_Scalp && !is_processing) {
+   if(Inp_Quick_Scalp && !is_processing && !is_warming_up) {
       if(b_t == 1 && s_t == 0 && b_p_thb >= Inp_Min_Profit_THB) {
          CloseSideProfitOnly(POSITION_TYPE_BUY); last_basket_close = TimeCurrent(); return; 
       }
@@ -478,13 +483,13 @@ void OnTick() {
       }
    }
 
-   if(Inp_Close_All_When_Green && !is_processing) {
+   if(Inp_Close_All_When_Green && !is_processing && !is_warming_up) {
       if(b_t > 0 && s_t > 0 && b_p_thb >= Inp_Close_All_Min_Profit_THB && s_p_thb >= Inp_Close_All_Min_Profit_THB) {
          CloseAllProfitOnly(); last_basket_close = TimeCurrent(); return;
       }
    }
 
-   if(Inp_Clear_Winner_Side && !is_processing) {
+   if(Inp_Clear_Winner_Side && !is_processing && !is_warming_up) {
       if(b_t > 0 && b_p_thb >= Inp_Min_Profit_THB) {
          if(Inp_Nuke_Board && total_thb >= 0) CloseAllProfitOnly(); else CloseSideProfitOnly(POSITION_TYPE_BUY); 
          last_basket_close = TimeCurrent(); return; 
@@ -518,10 +523,10 @@ void OnTick() {
    ManagePartialClose();
 
    // ปิดไม้ lot จิ๋วที่ค้างจาก Partial Close
-   CleanupTinyPositions();
+   if(!is_warming_up) CleanupTinyPositions();
 
    double velocity = MathAbs(iClose(_Symbol, PERIOD_M1, 0) - iOpen(_Symbol, PERIOD_M1, 0)) / _Point;
-   if(Inp_Use_AI_Exit && total_thb > (Inp_Target_THB * 0.5) && velocity < 5.0 && (b_t > 0 || s_t > 0)) {
+   if(Inp_Use_AI_Exit && !is_warming_up && total_thb > (Inp_Target_THB * 0.5) && velocity < 5.0 && (b_t > 0 || s_t > 0)) {
       // ปิดเฉพาะเมื่อไม่มีฝั่งไหนขาดทุนหนัก (กัน cut loss)
       if(b_p_thb >= 0 && s_p_thb >= 0) {
          CloseAllProfitOnly(); last_basket_close = TimeCurrent(); return;
@@ -578,13 +583,13 @@ if(!is_processing)
    }
 }
 
-   if(Inp_Use_Survivor && (datetime)TimeCurrent() - lastTradeTime > 5) {
+   if(Inp_Use_Survivor && !is_warming_up && (datetime)TimeCurrent() - lastTradeTime > 5) {
       if(b_t >= 2) TrySurvivorClear(POSITION_TYPE_BUY);
       if(s_t >= 2) TrySurvivorClear(POSITION_TYPE_SELL);
    }
 
    // --- [เพิ่มระบบแทรก: Cross Survivor] ---
-   if(Inp_Cross_Survivor && !is_processing && (datetime)TimeCurrent() - lastTradeTime > 5) {
+   if(Inp_Cross_Survivor && !is_processing && !is_warming_up && (datetime)TimeCurrent() - lastTradeTime > 5) {
       if(b_t > 0 && s_t > 0) TryCrossSurvivorClear(divider);
    }
    // ------------------------------------
@@ -1285,15 +1290,24 @@ void ApplyBasketTrailing(ENUM_POSITION_TYPE type, double avg_price, double profi
       ulong tk = PositionGetTicket(i);
       if(PositionSelectByTicket(tk) && PositionGetInteger(POSITION_MAGIC) == Inp_Magic && PositionGetString(POSITION_SYMBOL) == _Symbol) {
          double sl = PositionGetDouble(POSITION_SL), tp = PositionGetDouble(POSITION_TP);
+         double op = PositionGetDouble(POSITION_PRICE_OPEN);
          if(type == POSITION_TYPE_BUY) {
             double be_price = NormalizeDouble(avg_price + (be_lock * _Point), _Digits);
+            // กัน SL ต่ำกว่าราคาเปิดของไม้ (ป้องกันขาดทุน)
+            if(be_price < op) be_price = NormalizeDouble(op + _Point, _Digits);
             if(current_points >= be_trigger && (sl < avg_price)) trade.PositionModify(tk, be_price, tp);
             double trail_price = NormalizeDouble(bid - (trail_stop * _Point), _Digits);
+            // กัน trail SL ต่ำกว่าราคาเปิด
+            if(trail_price < op) trail_price = NormalizeDouble(op + _Point, _Digits);
             if(sl >= avg_price && trail_price > sl + (trail_step * _Point) && trail_price > avg_price) trade.PositionModify(tk, trail_price, tp);
          } else {
             double be_price = NormalizeDouble(avg_price - (be_lock * _Point), _Digits);
+            // กัน SL สูงกว่าราคาเปิดของไม้ (ป้องกันขาดทุน)
+            if(be_price > op) be_price = NormalizeDouble(op - _Point, _Digits);
             if(current_points >= be_trigger && (sl > avg_price || sl == 0)) trade.PositionModify(tk, be_price, tp);
             double trail_price = NormalizeDouble(ask + (trail_stop * _Point), _Digits);
+            // กัน trail SL สูงกว่าราคาเปิด
+            if(trail_price > op) trail_price = NormalizeDouble(op - _Point, _Digits);
             if(sl != 0 && sl <= avg_price && trail_price < sl - (trail_step * _Point) && trail_price < avg_price) trade.PositionModify(tk, trail_price, tp);
          }
       }
@@ -1828,7 +1842,8 @@ void CloseMainAndRescue() {
          long magic = PositionGetInteger(POSITION_MAGIC);
 
          if(magic == Inp_Magic || magic == Inp_Rescue_Magic || magic == Inp_Pull_Magic) {
-            trade.PositionClose(ticket);
+            double profit = PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
+            if(profit >= 0) trade.PositionClose(ticket);
          }
       }
    }
