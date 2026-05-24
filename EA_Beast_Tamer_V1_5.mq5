@@ -108,6 +108,7 @@ input double  Inp_Min_Margin      = 150.0;  // % Margin ขั้นต่ำ
 // --- [กลุ่มที่ 8: ระบบกันทุน & Trailing] ---
 input group "🛡️ ระบบป้องกันกำไรยกตะกร้า"
 input bool    Inp_Use_Trailing   = true;   // เปิดระบบ Trailing
+input bool    Inp_Auto_SL        = true;   // คำนวณ SL อัตโนมัติ (จาก ATR ไม่ต้องตั้งเอง)
 input int     Inp_BE_Trigger     = 450;    // เริ่มวาง SL หน้าทุน
 input int     Inp_BE_Lock        = 150;    // ระยะ SL หน้าทุน
 input int     Inp_Trail_Stop      = 400;    // ระยะ SL วิ่งไล่ตามราคา
@@ -924,20 +925,45 @@ void ApplyBasketTrailing(ENUM_POSITION_TYPE type, double avg_price, double profi
    double tick_val = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE), tick_size = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
    double current_points = (profit_usd) / (total_vol * tick_val / tick_size) / _Point;
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID), ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+
+   // Auto SL: คำนวณค่าจาก ATR อัตโนมัติ
+   int be_trigger = Inp_BE_Trigger;
+   int be_lock = Inp_BE_Lock;
+   int trail_stop = Inp_Trail_Stop;
+   int trail_step = Inp_Trail_Step;
+
+   if(Inp_Auto_SL)
+   {
+      double atr_v[];
+      ArraySetAsSeries(atr_v, true);
+      if(CopyBuffer(h_atr, 0, 0, 1, atr_v) > 0 && atr_v[0] > 0)
+      {
+         int atr_pts = (int)(atr_v[0] / _Point);
+         be_trigger = (int)(atr_pts * 1.5);
+         be_lock    = (int)(atr_pts * 0.5);
+         trail_stop = (int)(atr_pts * 1.2);
+         trail_step = (int)(atr_pts * 0.15);
+         if(be_trigger < 50) be_trigger = 50;
+         if(be_lock < 20) be_lock = 20;
+         if(trail_stop < 50) trail_stop = 50;
+         if(trail_step < 10) trail_step = 10;
+      }
+   }
+
    for(int i=PositionsTotal()-1; i>=0; i--) {
       ulong tk = PositionGetTicket(i);
       if(PositionSelectByTicket(tk) && PositionGetInteger(POSITION_MAGIC) == Inp_Magic && PositionGetString(POSITION_SYMBOL) == _Symbol) {
          double sl = PositionGetDouble(POSITION_SL), tp = PositionGetDouble(POSITION_TP);
          if(type == POSITION_TYPE_BUY) {
-            double be_price = NormalizeDouble(avg_price + (Inp_BE_Lock * _Point), _Digits);
-            if(current_points >= Inp_BE_Trigger && (sl < avg_price)) trade.PositionModify(tk, be_price, tp);
-            double trail_price = NormalizeDouble(bid - (Inp_Trail_Stop * _Point), _Digits);
-            if(sl >= avg_price && trail_price > sl + (Inp_Trail_Step * _Point) && trail_price > avg_price) trade.PositionModify(tk, trail_price, tp);
+            double be_price = NormalizeDouble(avg_price + (be_lock * _Point), _Digits);
+            if(current_points >= be_trigger && (sl < avg_price)) trade.PositionModify(tk, be_price, tp);
+            double trail_price = NormalizeDouble(bid - (trail_stop * _Point), _Digits);
+            if(sl >= avg_price && trail_price > sl + (trail_step * _Point) && trail_price > avg_price) trade.PositionModify(tk, trail_price, tp);
          } else {
-            double be_price = NormalizeDouble(avg_price - (Inp_BE_Lock * _Point), _Digits);
-            if(current_points >= Inp_BE_Trigger && (sl > avg_price || sl == 0)) trade.PositionModify(tk, be_price, tp);
-            double trail_price = NormalizeDouble(ask + (Inp_Trail_Stop * _Point), _Digits);
-            if(sl != 0 && sl <= avg_price && trail_price < sl - (Inp_Trail_Step * _Point) && trail_price < avg_price) trade.PositionModify(tk, trail_price, tp);
+            double be_price = NormalizeDouble(avg_price - (be_lock * _Point), _Digits);
+            if(current_points >= be_trigger && (sl > avg_price || sl == 0)) trade.PositionModify(tk, be_price, tp);
+            double trail_price = NormalizeDouble(ask + (trail_stop * _Point), _Digits);
+            if(sl != 0 && sl <= avg_price && trail_price < sl - (trail_step * _Point) && trail_price < avg_price) trade.PositionModify(tk, trail_price, tp);
          }
       }
    }
@@ -1770,6 +1796,31 @@ void ManageAllPositionsSL()
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
 
+   // Auto SL: คำนวณค่าจาก ATR อัตโนมัติ
+   int sl_trigger = Inp_All_SL_Trigger;
+   int sl_lock = Inp_All_SL_Lock;
+   int sl_trail_dist = Inp_All_SL_Trail_Dist;
+   int sl_step = Inp_All_SL_Step;
+
+   if(Inp_Auto_SL)
+   {
+      double atr_v[];
+      ArraySetAsSeries(atr_v, true);
+      if(CopyBuffer(h_atr, 0, 0, 1, atr_v) > 0 && atr_v[0] > 0)
+      {
+         int atr_pts = (int)(atr_v[0] / _Point);
+         sl_trigger    = (int)(atr_pts * 1.0);
+         sl_lock       = (int)(atr_pts * 0.3);
+         sl_trail_dist = (int)(atr_pts * 0.8);
+         sl_step       = (int)(atr_pts * 0.15);
+         if(sl_trigger < 50) sl_trigger = 50;
+         if(sl_lock < 10) sl_lock = 10;
+         if(sl_trail_dist < 30) sl_trail_dist = 30;
+         if(sl_step < 10) sl_step = 10;
+      }
+   }
+
+
    for(int i = PositionsTotal()-1; i >= 0; i--)
    {
       ulong ticket = PositionGetTicket(i);
@@ -1791,9 +1842,9 @@ void ManageAllPositionsSL()
       {
          double profit_pts = (bid - op) / _Point;
 
-         if(profit_pts >= Inp_All_SL_Trigger)
+         if(profit_pts >= sl_trigger)
          {
-            double lock_sl = NormalizeDouble(op + Inp_All_SL_Lock * _Point, _Digits);
+            double lock_sl = NormalizeDouble(op + sl_lock * _Point, _Digits);
 
             if(sl == 0 || sl < op)
             {
@@ -1801,10 +1852,10 @@ void ManageAllPositionsSL()
             }
             else
             {
-               double trail_sl = NormalizeDouble(bid - Inp_All_SL_Trail_Dist * _Point, _Digits);
+               double trail_sl = NormalizeDouble(bid - sl_trail_dist * _Point, _Digits);
                trail_sl = MathMax(trail_sl, lock_sl);
 
-               if(trail_sl > sl + Inp_All_SL_Step * _Point)
+               if(trail_sl > sl + sl_step * _Point)
                   trade.PositionModify(ticket, trail_sl, tp);
             }
          }
@@ -1813,9 +1864,9 @@ void ManageAllPositionsSL()
       {
          double profit_pts = (op - ask) / _Point;
 
-         if(profit_pts >= Inp_All_SL_Trigger)
+         if(profit_pts >= sl_trigger)
          {
-            double lock_sl = NormalizeDouble(op - Inp_All_SL_Lock * _Point, _Digits);
+            double lock_sl = NormalizeDouble(op - sl_lock * _Point, _Digits);
 
             if(sl == 0 || sl > op)
             {
@@ -1823,10 +1874,10 @@ void ManageAllPositionsSL()
             }
             else
             {
-               double trail_sl = NormalizeDouble(ask + Inp_All_SL_Trail_Dist * _Point, _Digits);
+               double trail_sl = NormalizeDouble(ask + sl_trail_dist * _Point, _Digits);
                trail_sl = MathMin(trail_sl, lock_sl);
 
-               if(trail_sl < sl - Inp_All_SL_Step * _Point && trail_sl > 0)
+               if(trail_sl < sl - sl_step * _Point && trail_sl > 0)
                   trade.PositionModify(ticket, trail_sl, tp);
             }
          }
