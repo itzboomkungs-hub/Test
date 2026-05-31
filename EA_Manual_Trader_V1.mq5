@@ -644,8 +644,8 @@ void CheckNetProfitClose(double divider)
 //====================================================================
 void CheckRescue(double divider)
 {
-   if(Inp_Use_Session && !IsInSession()) return;
-   if(Inp_Use_Spread && !IsSpreadOK()) return;
+   if(Inp_Use_Session && !IsInSession()) { Print("[Rescue] SKIP: นอก Session"); return; }
+   if(Inp_Use_Spread && !IsSpreadOK()) { Print("[Rescue] SKIP: Spread กว้างเกิน"); return; }
 
    // Cooldown ภายในฟังก์ชัน (ไม่ต้อง Global/Input)
    static datetime last_open_sell = 0;
@@ -770,6 +770,17 @@ void CheckRescue(double divider)
 
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+
+   // === DIAGNOSTIC LOG (ลบได้เมื่อทำงานปกติ) ===
+   static datetime last_diag = 0;
+   if(TimeCurrent() - last_diag >= 30)  // log ทุก 30 วิ ป้องกัน spam
+   {
+      last_diag = TimeCurrent();
+      Print(StringFormat("[Rescue DIAG] b_count=%d b_profit=%.2f s_count=%d s_profit=%.2f Hedge=%s MaxCnt=%d stop=%s",
+            b_count, b_profit, s_count, s_profit,
+            Inp_Rescue_Hedge?"Y":"N", Inp_Rescue_MaxCount,
+            g_stop_trading?"Y":"N"));
+   }
 
    // Buy ดอย → Rescue (Hedge=Sell, AvgDown=Buy เพิ่ม)
    // นับจำนวน rescue ตามโหมด: Hedge นับ Sell, AvgDown นับ Buy
