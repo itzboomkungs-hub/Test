@@ -3,7 +3,8 @@
 //|  ระบบเทรดมือ + TP/SL + แก้ไม้ + แจ้งเตือนจังหวะ               |
 //+------------------------------------------------------------------+
 #property copyright "Manual Trader V1"
-#property version   "1.0"
+#property version   "2.0"
+#define EA_BUILD "v2.0-fix6 (2026-05-31)"
 #include <Trade\Trade.mqh>
 CTrade trade;
 
@@ -127,6 +128,9 @@ string GV_CMD  = "MT_CMD_";  // GlobalVariable prefix สำหรับ Remote 
 //====================================================================
 int OnInit()
 {
+   Print("===== EA_Manual_Trader ", EA_BUILD, " =====");
+   Print("Hedge=", Inp_Rescue_Hedge, " MaxCnt=", Inp_Rescue_MaxCount, " UseRescue=", Inp_Use_Rescue);
+
    h_ema_fast = iMA(_Symbol, PERIOD_M5, Inp_EMA_Fast, 0, MODE_EMA, PRICE_CLOSE);
    h_ema_slow = iMA(_Symbol, PERIOD_M5, Inp_EMA_Slow, 0, MODE_EMA, PRICE_CLOSE);
    h_rsi      = iRSI(_Symbol, PERIOD_M5, Inp_RSI_Period, PRICE_CLOSE);
