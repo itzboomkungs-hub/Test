@@ -780,15 +780,16 @@ void CheckRescue(double divider)
    if((b_count > 0 && b_vol > 0 && b_profit < 0) || buy_orphan || buy_recovered_but_rescue_losing)
    {
       double avg_buy, drag;
-      if(b_count > 0 && b_vol > 0)
+      bool use_rescue_drag = buy_orphan || buy_recovered_but_rescue_losing;
+      if(b_count > 0 && b_vol > 0 && !use_rescue_drag)
       {
          avg_buy = b_cost / b_vol;
          drag = (avg_buy - bid) / _Point;
       }
       else
       {
-         // Orphan: ไม้หลัก BUY หมดแล้ว Rescue Sell ค้างอยู่
-         // คำนวณ drag จาก Rescue Sell entry → ใช้ ask - avg เพราะ Sell ดอยเมื่อราคาขึ้น
+         // Orphan / Main recovered: คำนวณ drag จาก Rescue Sell entry
+         // ใช้ ask - avg เพราะ Sell ดอยเมื่อราคาขึ้น
          double r_vol = 0, r_cost = 0;
          for(int i=PositionsTotal()-1; i>=0; i--)
          {
@@ -847,9 +848,9 @@ void CheckRescue(double divider)
                   buy_orphan?"Y":"N"));
             trade.SetExpertMagicNumber(Inp_Rescue_Magic);
 
-            if(buy_orphan)
+            if(use_rescue_drag)
             {
-               // Orphan: Rescue Sell ดอย → แก้ด้วยฝั่งตรงข้าม (Buy)
+               // Orphan / Main recovered: Rescue Sell ดอย → แก้ด้วยฝั่งตรงข้าม (Buy)
                if(Inp_Rescue_Hedge)
                {
                   double r_ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
@@ -858,6 +859,7 @@ void CheckRescue(double divider)
                   {
                      DrawArrow(r_ask, true);
                      last_open_buy = TimeCurrent();
+                     last_open_sell = TimeCurrent();  // อัปเดต cooldown ทั้งสองฝั่งกัน rapid-fire
                      Print("Rescue Buy(Orphan) #", rescue_count+1, " Lot=", DoubleToString(lot,2), " Drag=", DoubleToString(drag,0));
                   }
                }
@@ -915,15 +917,16 @@ void CheckRescue(double divider)
    if((s_count > 0 && s_vol > 0 && s_profit < 0) || sell_orphan || sell_recovered_but_rescue_losing)
    {
       double avg_sell, drag;
-      if(s_count > 0 && s_vol > 0)
+      bool use_rescue_drag_s = sell_orphan || sell_recovered_but_rescue_losing;
+      if(s_count > 0 && s_vol > 0 && !use_rescue_drag_s)
       {
          avg_sell = s_cost / s_vol;
          drag = (ask - avg_sell) / _Point;
       }
       else
       {
-         // Orphan: ไม้หลัก SELL หมดแล้ว Rescue Buy ค้างอยู่
-         // คำนวณ drag จาก Rescue Buy entry → ใช้ avg - bid เพราะ Buy ดอยเมื่อราคาลง
+         // Orphan / Main recovered: คำนวณ drag จาก Rescue Buy entry
+         // ใช้ avg - bid เพราะ Buy ดอยเมื่อราคาลง
          double r_vol = 0, r_cost = 0;
          for(int i=PositionsTotal()-1; i>=0; i--)
          {
@@ -983,9 +986,9 @@ void CheckRescue(double divider)
 
             trade.SetExpertMagicNumber(Inp_Rescue_Magic);
 
-            if(sell_orphan)
+            if(use_rescue_drag_s)
             {
-               // Orphan: Rescue Buy ดอย → แก้ด้วยฝั่งตรงข้าม (Sell)
+               // Orphan / Main recovered: Rescue Buy ดอย → แก้ด้วยฝั่งตรงข้าม (Sell)
                if(Inp_Rescue_Hedge)
                {
                   double r_bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
@@ -994,6 +997,7 @@ void CheckRescue(double divider)
                   {
                      DrawArrow(r_bid, false);
                      last_open_sell = TimeCurrent();
+                     last_open_buy = TimeCurrent();   // อัปเดต cooldown ทั้งสองฝั่งกัน rapid-fire
                      Print("Rescue Sell(Orphan) #", rescue_count+1, " Lot=", DoubleToString(lot,2), " Drag=", DoubleToString(drag,0));
                   }
                }
