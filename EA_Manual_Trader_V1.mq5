@@ -4,7 +4,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Manual Trader V1"
 #property version   "2.0"
-#define EA_BUILD "v2.2-fix8 (2026-05-31)"
+#define EA_BUILD "v2.3-fix9 (2026-05-31)"
 #include <Trade\Trade.mqh>
 CTrade trade;
 
@@ -346,6 +346,52 @@ double CalcTP(double open_price, bool is_buy)
       return NormalizeDouble(open_price + tp_pts * _Point, _Digits);
    else
       return NormalizeDouble(open_price - tp_pts * _Point, _Digits);
+}
+
+//====================================================================
+// AvgDown: ขยับ TP ทุกไม้ฝั่งเดียวกันไปที่ Breakeven + กำไร
+//====================================================================
+void UpdateGroupTP(bool is_buy)
+{
+   ENUM_POSITION_TYPE side = is_buy ? POSITION_TYPE_BUY : POSITION_TYPE_SELL;
+   double total_vol = 0, total_cost = 0;
+
+   for(int i = PositionsTotal()-1; i >= 0; i--)
+   {
+      ulong tk = PositionGetTicket(i);
+      if(!PositionSelectByTicket(tk)) continue;
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+      long mg = PositionGetInteger(POSITION_MAGIC);
+      if(mg != Inp_Magic && mg != Inp_Rescue_Magic) continue;
+      if(PositionGetInteger(POSITION_TYPE) != side) continue;
+      double v = PositionGetDouble(POSITION_VOLUME);
+      total_vol += v;
+      total_cost += PositionGetDouble(POSITION_PRICE_OPEN) * v;
+   }
+   if(total_vol <= 0) return;
+
+   double avg_price = NormalizeDouble(total_cost / total_vol, _Digits);
+   double tp = CalcTP(avg_price, is_buy);
+   if(tp <= 0) return;
+
+   for(int i = PositionsTotal()-1; i >= 0; i--)
+   {
+      ulong tk = PositionGetTicket(i);
+      if(!PositionSelectByTicket(tk)) continue;
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+      long mg = PositionGetInteger(POSITION_MAGIC);
+      if(mg != Inp_Magic && mg != Inp_Rescue_Magic) continue;
+      if(PositionGetInteger(POSITION_TYPE) != side) continue;
+
+      double cur_tp = PositionGetDouble(POSITION_TP);
+      if(MathAbs(cur_tp - tp) > _Point)
+      {
+         double sl = PositionGetDouble(POSITION_SL);
+         trade.PositionModify(tk, sl, tp);
+      }
+   }
+   Print(StringFormat("[GroupTP] %s avg=%.5f TP=%.5f totalVol=%.2f",
+         is_buy ? "BUY" : "SELL", avg_price, tp, total_vol));
 }
 
 //====================================================================
@@ -915,6 +961,7 @@ void CheckRescue(double divider)
                      DrawArrow(r_bid, false);
                      last_open_sell = last_open_buy = TimeCurrent();
                      Print("AvgUp Sell(Orphan) #", rescue_count+1, " Lot=", DoubleToString(lot,2), " Drag=", DoubleToString(drag,0));
+                     UpdateGroupTP(false);  // ขยับ TP ทุกไม้ SELL ไปที่ breakeven+กำไร
                   }
                }
             }
@@ -943,6 +990,7 @@ void CheckRescue(double divider)
                      DrawArrow(r_ask2, true);
                      last_open_sell = last_open_buy = TimeCurrent();
                      Print("AvgDown Buy #", rescue_count+1, " Lot=", DoubleToString(lot,2), " Drag=", DoubleToString(drag,0));
+                     UpdateGroupTP(true);   // ขยับ TP ทุกไม้ BUY ไปที่ breakeven+กำไร
                   }
                }
             }
@@ -1067,6 +1115,7 @@ void CheckRescue(double divider)
                      DrawArrow(r_ask, true);
                      last_open_sell = last_open_buy = TimeCurrent();
                      Print("AvgDown Buy(Orphan) #", rescue_count+1, " Lot=", DoubleToString(lot,2), " Drag=", DoubleToString(drag,0));
+                     UpdateGroupTP(true);   // ขยับ TP ทุกไม้ BUY ไปที่ breakeven+กำไร
                   }
                }
             }
@@ -1095,6 +1144,7 @@ void CheckRescue(double divider)
                      DrawArrow(r_bid2, false);
                      last_open_sell = last_open_buy = TimeCurrent();
                      Print("AvgDown Sell #", rescue_count+1, " Lot=", DoubleToString(lot,2), " Drag=", DoubleToString(drag,0));
+                     UpdateGroupTP(false);  // ขยับ TP ทุกไม้ SELL ไปที่ breakeven+กำไร
                   }
                }
             }
