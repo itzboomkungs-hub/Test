@@ -4,7 +4,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Manual Trader V1"
 #property version   "2.0"
-#define EA_BUILD "v2.1-fix7 (2026-05-31)"
+#define EA_BUILD "v2.2-fix8 (2026-05-31)"
 #include <Trade\Trade.mqh>
 CTrade trade;
 
@@ -34,7 +34,7 @@ input bool   Inp_Stop_At_Target = true;     // ถึงเป้าปิดก
 
 input group "🔄 ระยะแก้ไม จำกัดฝั่ง"
 input bool   Inp_Use_Rescue       = true;   // เปิดระบบแก้ไม้
-input int    Inp_Rescue_MaxCount  = 3;      // จำนวนไม้แก้สูงสุดต่อฝั่ง
+input int    Inp_Rescue_MaxCount  = 10;     // จำนวนไม้แก้สูงสุด (default 10, ปรับลดได้)
 
 input group "🔄 ระยะแก้ไม้แบบเลือกเอง (ระยะแก้ไม้ 1-10)"
 input int    Inp_RD1  = 200;   // ระยะแก้ไม้  1 
