@@ -774,7 +774,10 @@ void CheckRescue(double divider)
    // Buy ดอย → Rescue Sell (รวมกรณี BUY หลักปิดไปแล้วแต่ Rescue Sell ยังค้าง)
    int rescue_sell_count = CountBySideMagic(POSITION_TYPE_SELL, Inp_Rescue_Magic);
    bool buy_orphan = (b_count == 0 && rescue_sell_count > 0); // ไม้หลัก BUY หมดแต่ Rescue ยังค้าง
-   if((b_count > 0 && b_vol > 0 && b_profit < 0) || buy_orphan)
+   // เพิ่ม: ถ้า BUY หลักหายกำไรแล้ว แต่ Rescue Sell ยังดอยอยู่ → ยังต้องเช็ค rescue ต่อ
+   bool buy_recovered_but_rescue_losing = (b_count > 0 && b_profit >= 0 && rescue_sell_count > 0
+                                           && GetSideProfit(POSITION_TYPE_SELL, Inp_Rescue_Magic) < 0);
+   if((b_count > 0 && b_vol > 0 && b_profit < 0) || buy_orphan || buy_recovered_but_rescue_losing)
    {
       double avg_buy, drag;
       if(b_count > 0 && b_vol > 0)
@@ -784,7 +787,8 @@ void CheckRescue(double divider)
       }
       else
       {
-         // คำนวณ avg จาก Rescue Sell ที่ค้าง
+         // Orphan: ไม้หลัก BUY หมดแล้ว Rescue Sell ค้างอยู่
+         // คำนวณ drag จาก Rescue Sell entry → ใช้ ask - avg เพราะ Sell ดอยเมื่อราคาขึ้น
          double r_vol = 0, r_cost = 0;
          for(int i=PositionsTotal()-1; i>=0; i--)
          {
@@ -796,15 +800,20 @@ void CheckRescue(double divider)
             double v = PositionGetDouble(POSITION_VOLUME);
             r_vol += v; r_cost += PositionGetDouble(POSITION_PRICE_OPEN) * v;
          }
-         avg_buy = (r_vol > 0) ? r_cost / r_vol : bid;
-         drag = (avg_buy - bid) / _Point;
+         avg_buy = (r_vol > 0) ? r_cost / r_vol : ask;
+         // Sell ดอยเมื่อราคาขึ้น → drag = (ask - avg_entry) เป็นบวกเมื่อดอย
+         drag = (ask - avg_buy) / _Point;
+         if(drag < 0) drag = 0;  // ถ้า Rescue Sell กำไรอยู่ drag = 0
       }
       int rescue_count = rescue_sell_count;
       double need_drag = GetRescueDistance(rescue_count);
 
-      Print(StringFormat("[Rescue SELL] drag=%.0f need=%.0f cnt=%d profit=%.2f",
-            drag, need_drag, rescue_count,
-            GetSideProfit(POSITION_TYPE_SELL, Inp_Rescue_Magic)));
+      Print(StringFormat("[Rescue SELL] drag=%.0f need=%.0f cnt=%d/%d profit=%.2f orphan=%s",
+            drag, need_drag, rescue_count, Inp_Rescue_MaxCount,
+            GetSideProfit(POSITION_TYPE_SELL, Inp_Rescue_Magic),
+            buy_orphan?"Y":"N"));
+      if(rescue_count >= Inp_Rescue_MaxCount)
+         Print(StringFormat("[Rescue SELL] BLOCKED: MaxCount ถึงแล้ว (%d/%d)", rescue_count, Inp_Rescue_MaxCount));
       if(drag >= need_drag && rescue_count < Inp_Rescue_MaxCount)
       {
          bool do_open_sell = true;
@@ -833,31 +842,64 @@ void CheckRescue(double divider)
          {
             double lot_raw = Inp_BaseLot * MathPow(Inp_Rescue_Lot_Mult, rescue_count);
             double lot = SafeLot(lot_raw);
-            Print(StringFormat("[Rescue SELL] เปิดไม้#%d | BaseLot=%.4f Mult=%.1f^%d=%.4f -> lot=%.4f",
-                  rescue_count+1, Inp_BaseLot, Inp_Rescue_Lot_Mult, rescue_count, lot_raw, lot));
+            Print(StringFormat("[Rescue SELL] เปิดไม้#%d | BaseLot=%.4f Mult=%.1f^%d=%.4f -> lot=%.4f orphan=%s",
+                  rescue_count+1, Inp_BaseLot, Inp_Rescue_Lot_Mult, rescue_count, lot_raw, lot,
+                  buy_orphan?"Y":"N"));
             trade.SetExpertMagicNumber(Inp_Rescue_Magic);
-            if(Inp_Rescue_Hedge)
+
+            if(buy_orphan)
             {
-               // โหมดสวนฝั่ง: Buy ดอย → Sell
-               double r_bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-               double r_tp_sell = CalcTP(r_bid, false);
-               if(trade.Sell(lot, _Symbol, r_bid, 0, r_tp_sell, "Rescue Sell #"+(string)(rescue_count+1)))
+               // Orphan: Rescue Sell ดอย → แก้ด้วยฝั่งตรงข้าม (Buy)
+               if(Inp_Rescue_Hedge)
                {
-                  DrawArrow(r_bid, false);
-                  last_open_sell = TimeCurrent();
-                  Print("Rescue Sell #", rescue_count+1, " Lot=", DoubleToString(lot,2), " Drag=", DoubleToString(drag,0));
+                  double r_ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+                  double r_tp = CalcTP(r_ask, true);
+                  if(trade.Buy(lot, _Symbol, r_ask, 0, r_tp, "Rescue Buy(Orphan) #"+(string)(rescue_count+1)))
+                  {
+                     DrawArrow(r_ask, true);
+                     last_open_buy = TimeCurrent();
+                     Print("Rescue Buy(Orphan) #", rescue_count+1, " Lot=", DoubleToString(lot,2), " Drag=", DoubleToString(drag,0));
+                  }
+               }
+               else
+               {
+                  // Average Up: Rescue Sell ดอย → Sell เพิ่มที่ราคาสูงขึ้น
+                  double r_bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+                  double r_tp = CalcTP(r_bid, false);
+                  if(trade.Sell(lot, _Symbol, r_bid, 0, r_tp, "AvgUp Sell(Orphan) #"+(string)(rescue_count+1)))
+                  {
+                     DrawArrow(r_bid, false);
+                     last_open_sell = TimeCurrent();
+                     Print("AvgUp Sell(Orphan) #", rescue_count+1, " Lot=", DoubleToString(lot,2), " Drag=", DoubleToString(drag,0));
+                  }
                }
             }
             else
             {
-               // โหมด Average Down: Buy ดอย → Buy เพิ่ม
-               double r_ask2 = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-               double r_tp_buy2 = CalcTP(r_ask2, true);
-               if(trade.Buy(lot, _Symbol, r_ask2, 0, r_tp_buy2, "AvgDown Buy #"+(string)(rescue_count+1)))
+               // Normal: Main BUY ดอย → Rescue
+               if(Inp_Rescue_Hedge)
                {
-                  DrawArrow(r_ask2, true);
-                  last_open_buy = TimeCurrent();
-                  Print("AvgDown Buy #", rescue_count+1, " Lot=", DoubleToString(lot,2), " Drag=", DoubleToString(drag,0));
+                  // โหมดสวนฝั่ง: Buy ดอย → Sell
+                  double r_bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+                  double r_tp_sell = CalcTP(r_bid, false);
+                  if(trade.Sell(lot, _Symbol, r_bid, 0, r_tp_sell, "Rescue Sell #"+(string)(rescue_count+1)))
+                  {
+                     DrawArrow(r_bid, false);
+                     last_open_sell = TimeCurrent();
+                     Print("Rescue Sell #", rescue_count+1, " Lot=", DoubleToString(lot,2), " Drag=", DoubleToString(drag,0));
+                  }
+               }
+               else
+               {
+                  // โหมด Average Down: Buy ดอย → Buy เพิ่ม
+                  double r_ask2 = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+                  double r_tp_buy2 = CalcTP(r_ask2, true);
+                  if(trade.Buy(lot, _Symbol, r_ask2, 0, r_tp_buy2, "AvgDown Buy #"+(string)(rescue_count+1)))
+                  {
+                     DrawArrow(r_ask2, true);
+                     last_open_buy = TimeCurrent();
+                     Print("AvgDown Buy #", rescue_count+1, " Lot=", DoubleToString(lot,2), " Drag=", DoubleToString(drag,0));
+                  }
                }
             }
          }
@@ -867,7 +909,10 @@ void CheckRescue(double divider)
    // Sell ดอย → Rescue Buy (รวมกรณี SELL หลักปิดไปแล้วแต่ Rescue Buy ยังค้าง)
    int rescue_buy_count = CountBySideMagic(POSITION_TYPE_BUY, Inp_Rescue_Magic);
    bool sell_orphan = (s_count == 0 && rescue_buy_count > 0); // ไม้หลัก SELL หมดแต่ Rescue ยังค้าง
-   if((s_count > 0 && s_vol > 0 && s_profit < 0) || sell_orphan)
+   // เพิ่ม: ถ้า SELL หลักหายกำไรแล้ว แต่ Rescue Buy ยังดอยอยู่ → ยังต้องเช็ค rescue ต่อ
+   bool sell_recovered_but_rescue_losing = (s_count > 0 && s_profit >= 0 && rescue_buy_count > 0
+                                            && GetSideProfit(POSITION_TYPE_BUY, Inp_Rescue_Magic) < 0);
+   if((s_count > 0 && s_vol > 0 && s_profit < 0) || sell_orphan || sell_recovered_but_rescue_losing)
    {
       double avg_sell, drag;
       if(s_count > 0 && s_vol > 0)
@@ -877,7 +922,8 @@ void CheckRescue(double divider)
       }
       else
       {
-         // คำนวณ avg จาก Rescue Buy ที่ค้าง
+         // Orphan: ไม้หลัก SELL หมดแล้ว Rescue Buy ค้างอยู่
+         // คำนวณ drag จาก Rescue Buy entry → ใช้ avg - bid เพราะ Buy ดอยเมื่อราคาลง
          double r_vol = 0, r_cost = 0;
          for(int i=PositionsTotal()-1; i>=0; i--)
          {
@@ -889,15 +935,20 @@ void CheckRescue(double divider)
             double v = PositionGetDouble(POSITION_VOLUME);
             r_vol += v; r_cost += PositionGetDouble(POSITION_PRICE_OPEN) * v;
          }
-         avg_sell = (r_vol > 0) ? r_cost / r_vol : ask;
-         drag = (ask - avg_sell) / _Point;
+         avg_sell = (r_vol > 0) ? r_cost / r_vol : bid;
+         // Buy ดอยเมื่อราคาลง → drag = (avg_entry - bid) เป็นบวกเมื่อดอย
+         drag = (avg_sell - bid) / _Point;
+         if(drag < 0) drag = 0;  // ถ้า Rescue Buy กำไรอยู่ drag = 0
       }
       int rescue_count = rescue_buy_count;
       double need_drag = GetRescueDistance(rescue_count);
 
-      Print(StringFormat("[Rescue BUY] drag=%.0f need=%.0f cnt=%d profit=%.2f",
-            drag, need_drag, rescue_count,
-            GetSideProfit(POSITION_TYPE_BUY, Inp_Rescue_Magic)));
+      Print(StringFormat("[Rescue BUY] drag=%.0f need=%.0f cnt=%d/%d profit=%.2f orphan=%s",
+            drag, need_drag, rescue_count, Inp_Rescue_MaxCount,
+            GetSideProfit(POSITION_TYPE_BUY, Inp_Rescue_Magic),
+            sell_orphan?"Y":"N"));
+      if(rescue_count >= Inp_Rescue_MaxCount)
+         Print(StringFormat("[Rescue BUY] BLOCKED: MaxCount ถึงแล้ว (%d/%d)", rescue_count, Inp_Rescue_MaxCount));
       if(drag >= need_drag && rescue_count < Inp_Rescue_MaxCount)
       {
          bool do_open_buy = true;
@@ -926,32 +977,65 @@ void CheckRescue(double divider)
          {
             double lot_raw = Inp_BaseLot * MathPow(Inp_Rescue_Lot_Mult, rescue_count);
             double lot = SafeLot(lot_raw);
-            Print(StringFormat("[Rescue BUY] เปิดไม้#%d | BaseLot=%.4f Mult=%.1f^%d=%.4f -> lot=%.4f",
-                  rescue_count+1, Inp_BaseLot, Inp_Rescue_Lot_Mult, rescue_count, lot_raw, lot));
+            Print(StringFormat("[Rescue BUY] เปิดไม้#%d | BaseLot=%.4f Mult=%.1f^%d=%.4f -> lot=%.4f orphan=%s",
+                  rescue_count+1, Inp_BaseLot, Inp_Rescue_Lot_Mult, rescue_count, lot_raw, lot,
+                  sell_orphan?"Y":"N"));
 
             trade.SetExpertMagicNumber(Inp_Rescue_Magic);
-            if(Inp_Rescue_Hedge)
+
+            if(sell_orphan)
             {
-               // โหมดสวนฝั่ง: Sell ดอย → Buy
-               double r_ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-               double r_tp_buy = CalcTP(r_ask, true);
-               if(trade.Buy(lot, _Symbol, r_ask, 0, r_tp_buy, "Rescue Buy #"+(string)(rescue_count+1)))
+               // Orphan: Rescue Buy ดอย → แก้ด้วยฝั่งตรงข้าม (Sell)
+               if(Inp_Rescue_Hedge)
                {
-                  DrawArrow(r_ask, true);
-                  last_open_buy = TimeCurrent();
-                  Print("Rescue Buy #", rescue_count+1, " Lot=", DoubleToString(lot,2), " Drag=", DoubleToString(drag,0));
+                  double r_bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+                  double r_tp = CalcTP(r_bid, false);
+                  if(trade.Sell(lot, _Symbol, r_bid, 0, r_tp, "Rescue Sell(Orphan) #"+(string)(rescue_count+1)))
+                  {
+                     DrawArrow(r_bid, false);
+                     last_open_sell = TimeCurrent();
+                     Print("Rescue Sell(Orphan) #", rescue_count+1, " Lot=", DoubleToString(lot,2), " Drag=", DoubleToString(drag,0));
+                  }
+               }
+               else
+               {
+                  // Average Down: Rescue Buy ดอย → Buy เพิ่มที่ราคาต่ำลง
+                  double r_ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+                  double r_tp = CalcTP(r_ask, true);
+                  if(trade.Buy(lot, _Symbol, r_ask, 0, r_tp, "AvgDown Buy(Orphan) #"+(string)(rescue_count+1)))
+                  {
+                     DrawArrow(r_ask, true);
+                     last_open_buy = TimeCurrent();
+                     Print("AvgDown Buy(Orphan) #", rescue_count+1, " Lot=", DoubleToString(lot,2), " Drag=", DoubleToString(drag,0));
+                  }
                }
             }
             else
             {
-               // โหมด Average Down: Sell ดอย → Sell เพิ่ม
-               double r_bid2 = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-               double r_tp_sell2 = CalcTP(r_bid2, false);
-               if(trade.Sell(lot, _Symbol, r_bid2, 0, r_tp_sell2, "AvgDown Sell #"+(string)(rescue_count+1)))
+               // Normal: Main SELL ดอย → Rescue
+               if(Inp_Rescue_Hedge)
                {
-                  DrawArrow(r_bid2, false);
-                  last_open_sell = TimeCurrent();
-                  Print("AvgDown Sell #", rescue_count+1, " Lot=", DoubleToString(lot,2), " Drag=", DoubleToString(drag,0));
+                  // โหมดสวนฝั่ง: Sell ดอย → Buy
+                  double r_ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+                  double r_tp_buy = CalcTP(r_ask, true);
+                  if(trade.Buy(lot, _Symbol, r_ask, 0, r_tp_buy, "Rescue Buy #"+(string)(rescue_count+1)))
+                  {
+                     DrawArrow(r_ask, true);
+                     last_open_buy = TimeCurrent();
+                     Print("Rescue Buy #", rescue_count+1, " Lot=", DoubleToString(lot,2), " Drag=", DoubleToString(drag,0));
+                  }
+               }
+               else
+               {
+                  // โหมด Average Down: Sell ดอย → Sell เพิ่ม
+                  double r_bid2 = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+                  double r_tp_sell2 = CalcTP(r_bid2, false);
+                  if(trade.Sell(lot, _Symbol, r_bid2, 0, r_tp_sell2, "AvgDown Sell #"+(string)(rescue_count+1)))
+                  {
+                     DrawArrow(r_bid2, false);
+                     last_open_sell = TimeCurrent();
+                     Print("AvgDown Sell #", rescue_count+1, " Lot=", DoubleToString(lot,2), " Drag=", DoubleToString(drag,0));
+                  }
                }
             }
          }
