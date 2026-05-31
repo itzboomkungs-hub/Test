@@ -790,6 +790,18 @@ void CheckRescue(double divider)
    // เพิ่ม: ถ้า BUY หลักหายกำไรแล้ว แต่ Rescue ยังดอยอยู่ → ยังต้องเช็ค rescue ต่อ
    bool buy_recovered_but_rescue_losing = (b_count > 0 && b_profit >= 0 && rescue_b_count > 0
                                            && GetSideProfit(rescue_type_b, Inp_Rescue_Magic) < 0);
+   // DIAG: ทำไม BUY rescue ไม่เข้า?
+   if(b_count > 0 && b_profit >= 0 && !buy_orphan && !buy_recovered_but_rescue_losing)
+   {
+      if(TimeCurrent() - last_diag <= 30) {} // ไม่ print ซ้ำ
+      else Print(StringFormat("[Rescue DIAG-B] BUY ไม่ดอย: b_count=%d b_profit=%.2f (ต้องติดลบ)", b_count, b_profit));
+   }
+   if(b_count == 0 && !buy_orphan)
+   {
+      if(TimeCurrent() - last_diag <= 30) {} // ไม่ print ซ้ำ
+      else Print(StringFormat("[Rescue DIAG-B] ไม่มี Main BUY (b_count=0) resc_b=%d", rescue_b_count));
+   }
+
    if((b_count > 0 && b_vol > 0 && b_profit < 0) || buy_orphan || buy_recovered_but_rescue_losing)
    {
       double avg_buy, drag;
