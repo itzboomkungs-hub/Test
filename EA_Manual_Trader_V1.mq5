@@ -4,7 +4,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Manual Trader V1"
 #property version   "2.0"
-#define EA_BUILD "v2.0-fix6 (2026-05-31)"
+#define EA_BUILD "v2.1-fix7 (2026-05-31)"
 #include <Trade\Trade.mqh>
 CTrade trade;
 
@@ -843,7 +843,12 @@ void CheckRescue(double divider)
          }
          if(drag < 0) drag = 0;
       }
-      int rescue_count = rescue_b_count;
+      // Orphan Hedge: เปิดฝั่งตรงข้าม → นับฝั่งที่เปิด, ไม่ใช่ฝั่งเดิม
+      int rescue_count;
+      if(use_rescue_drag && Inp_Rescue_Hedge)
+         rescue_count = CountByMagic(Inp_Rescue_Magic);  // นับทั้งหมด (Sell เดิม + Buy ที่แก้)
+      else
+         rescue_count = rescue_b_count;
       double need_drag = GetRescueDistance(rescue_count);
 
       Print(StringFormat("[Rescue SELL] drag=%.0f need=%.0f cnt=%d/%d profit=%.2f orphan=%s mode=%s",
@@ -990,7 +995,12 @@ void CheckRescue(double divider)
          }
          if(drag < 0) drag = 0;
       }
-      int rescue_count = rescue_s_count;
+      // Orphan Hedge: เปิดฝั่งตรงข้าม → นับทั้งหมด ไม่ใช่แค่ฝั่งเดิม
+      int rescue_count;
+      if(use_rescue_drag_s && Inp_Rescue_Hedge)
+         rescue_count = CountByMagic(Inp_Rescue_Magic);  // นับทั้งหมด (Buy เดิม + Sell ที่แก้)
+      else
+         rescue_count = rescue_s_count;
       double need_drag = GetRescueDistance(rescue_count);
 
       Print(StringFormat("[Rescue BUY] drag=%.0f need=%.0f cnt=%d/%d profit=%.2f orphan=%s mode=%s",
