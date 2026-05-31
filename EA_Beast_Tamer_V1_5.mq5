@@ -270,12 +270,18 @@ input int TradeCooldownSec = 300;
 
 bool ConfirmBuyTrend()
 {
-   double ema = iMA(_Symbol,_Period,20,0,MODE_EMA,PRICE_CLOSE);
+   double ma_buf[];
+   ArraySetAsSeries(ma_buf, true);
+   int h = iMA(_Symbol, PERIOD_H1, 30, 0, MODE_EMA, PRICE_CLOSE);
+   if(h == INVALID_HANDLE) return false;
+   if(CopyBuffer(h, 0, 1, 2, ma_buf) < 2) { IndicatorRelease(h); return false; }
 
-   double close1 = iClose(_Symbol,_Period,1);
-   double close2 = iClose(_Symbol,_Period,2);
+   double close1 = iClose(_Symbol, PERIOD_H1, 1);
+   double close2 = iClose(_Symbol, PERIOD_H1, 2);
 
-   return (close1 > ema && close2 > ema);
+   bool result = (close1 > ma_buf[0] && close2 > ma_buf[1]);
+   IndicatorRelease(h);
+   return result;
 }
 
 bool CanRecovery()
@@ -311,12 +317,18 @@ double GetNextLot()
 //
 bool ConfirmSellTrend()
 {
-   double ema = iMA(_Symbol,_Period,20,0,MODE_EMA,PRICE_CLOSE);
+   double ma_buf[];
+   ArraySetAsSeries(ma_buf, true);
+   int h = iMA(_Symbol, PERIOD_H1, 30, 0, MODE_EMA, PRICE_CLOSE);
+   if(h == INVALID_HANDLE) return false;
+   if(CopyBuffer(h, 0, 1, 2, ma_buf) < 2) { IndicatorRelease(h); return false; }
 
-   double close1 = iClose(_Symbol,_Period,1);
-   double close2 = iClose(_Symbol,_Period,2);
+   double close1 = iClose(_Symbol, PERIOD_H1, 1);
+   double close2 = iClose(_Symbol, PERIOD_H1, 2);
 
-   return (close1 < ema && close2 < ema);
+   bool result = (close1 < ma_buf[0] && close2 < ma_buf[1]);
+   IndicatorRelease(h);
+   return result;
 }
 
   bool CanOpenNewTrade()
@@ -610,18 +622,25 @@ if(!is_processing)
       if(g_auto_mode && b_t == 0 && s_t == 0) {
          if((datetime)TimeCurrent() - last_basket_close > Inp_CoolDown_Sec) {
             bool trigger = (g_infinity_mode) || (rsi_v[0] >= Inp_RSI_High || rsi_v[0] <= Inp_RSI_Low);
-            bool is_uptrend = (iClose(_Symbol, PERIOD_H1, 0) > ma_v[0]);  
-              //bool is_uptrend = (iClose(_Symbol, PERIOD_H1, 0) > ma_v[0]);
+            bool is_uptrend  = ConfirmBuyTrend();
+            bool is_downtrend = ConfirmSellTrend();
 
                if(Inp_Use_Time_Filter && !IsThaiTimeWindow()) { trigger = false; ShowBigMessage("⏰ ยังไม่ถึงเวลาเทรด", clrOrangeRed); }
             if(trigger) {
                trade.SetExpertMagicNumber(Inp_Magic);
                if(g_trend_filter) {
-                  // ถ้าเปิดกรองเทรนด์ จะเปิดเฉพาะฝั่งที่เทรนด์ 
-                  if(is_uptrend) trade.Buy(SafeLot(GetAntiMartLot(Inp_BaseLot)));
-                  else trade.Sell(SafeLot(GetAntiMartLot(Inp_BaseLot)));
+                  if(Inp_Trend_Follow) {
+                     // Trend Follow: เปิดเฉพาะฝั่งเทรนด์ที่ยืนยันแล้ว (2 แท่ง)
+                     if(is_uptrend)       trade.Buy(SafeLot(GetAntiMartLot(Inp_BaseLot)));
+                     else if(is_downtrend) trade.Sell(SafeLot(GetAntiMartLot(Inp_BaseLot)));
+                     // ถ้าเทรนด์ไม่ชัด → ไม่เปิด
+                  } else {
+                     // กันสวนเทรนด์: เปิดได้ทั้งสองฝั่ง แต่บล็อกฝั่งที่สวน
+                     if(!is_downtrend) trade.Buy(SafeLot(GetAntiMartLot(Inp_BaseLot)));
+                     if(!is_uptrend)  trade.Sell(SafeLot(GetAntiMartLot(Inp_BaseLot)));
+                  }
                } else {
-                  // ถ้าไม่กรองเทรนด์ เปิดตามลอจิกเดิม (Double Force)
+                  // ไม่กรองเทรนด์ → เปิดตามลอจิกเดิม (Double Force)
                   trade.Buy(SafeLot(GetAntiMartLot(Inp_BaseLot)));
                   if(g_double_force) trade.Sell(SafeLot(GetAntiMartLot(Inp_BaseLot))); 
                }
@@ -673,15 +692,10 @@ void SmartCheckRecovery(ENUM_POSITION_TYPE t, int tot, double atr) {
    if(Inp_Use_Time_Filter && !IsThaiTimeWindow()) return;
    if(!PassMultiFilter(t)) return;
 
-   // ถ้าเปิดกรองเทรนด์ จะไม่แก้ไม้ฝั่งที่สวนเทรนด์
+   // ถ้าเปิดกรองเทรนด์ จะไม่แก้ไม้ฝั่งที่สวนเทรนด์ (ยืนยัน 2 แท่ง)
    if(g_trend_filter) {
-      double ma_v[]; ArraySetAsSeries(ma_v, true);
-      if(CopyBuffer(h_ma, 0, 0, 1, ma_v) > 0) {
-         //bool is_uptrend = (iClose(_Symbol, PERIOD_H1, 0) > ma_v[0]);
-         bool is_uptrend = (iClose(_Symbol, PERIOD_H1, 0) > ma_v[0]);
-         if(t == POSITION_TYPE_BUY && !is_uptrend) return;
-         if(t == POSITION_TYPE_SELL && is_uptrend) return;
-      }
+      if(t == POSITION_TYPE_BUY  && !ConfirmBuyTrend())  return;
+      if(t == POSITION_TYPE_SELL && !ConfirmSellTrend()) return;
    }
 
    double lp=0, ll=0;
