@@ -4,7 +4,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Manual Trader V1"
 #property version   "2.0"
-#define EA_BUILD "v2.3-fix9 (2026-05-31)"
+#define EA_BUILD "v2.4-fix10 (2026-05-31)"
 #include <Trade\Trade.mqh>
 CTrade trade;
 
@@ -555,6 +555,15 @@ void ManageTrailingSL()
    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    bool   use_trail = (Inp_Trail_Step > 0);
 
+   // AvgDown mode: ใช้ Group SL จากราคาเฉลี่ยรวม
+   if(!Inp_Rescue_Hedge && Inp_Use_Rescue)
+   {
+      ManageGroupSL(true,  bid, ask, use_trail);  // BUY group
+      ManageGroupSL(false, bid, ask, use_trail);  // SELL group
+      return;
+   }
+
+   // Hedge mode / ไม่มี Rescue: SL ทีละออเดอร์ตามปกติ
    for(int i=PositionsTotal()-1; i>=0; i--)
    {
       ulong ticket = PositionGetTicket(i);
@@ -569,25 +578,21 @@ void ManageTrailingSL()
       if(type == POSITION_TYPE_BUY)
       {
          double profit_pts = (bid - op) / _Point;
-         if(profit_pts < Inp_BE_Trigger) continue;   // ยังไม่ถึง BE trigger
+         if(profit_pts < Inp_BE_Trigger) continue;
 
          double new_sl;
          if(use_trail)
          {
-            // Trailing: SL = bid - Trail_Step จุด (ตามราคาปัจจุบัน) แต่ไม่ต่ำกว่า op
             double trail_sl = NormalizeDouble(bid - Inp_Trail_Step * _Point, _Digits);
             new_sl = MathMax(trail_sl, NormalizeDouble(op, _Digits));
          }
          else
-         {
-            new_sl = NormalizeDouble(op, _Digits);   // BE เอย
-         }
+            new_sl = NormalizeDouble(op, _Digits);
 
-         // ขยับ SL ขึ้นเท่านั้น ไม่เล่ยลง
          if(sl < new_sl - _Point * 0.5)
             trade.PositionModify(ticket, new_sl, tp);
       }
-      else // SELL
+      else
       {
          double profit_pts = (op - ask) / _Point;
          if(profit_pts < Inp_BE_Trigger) continue;
@@ -595,19 +600,84 @@ void ManageTrailingSL()
          double new_sl;
          if(use_trail)
          {
-            // Trailing: SL = ask + Trail_Step จุด แต่ไม่สูงกว่า op
             double trail_sl = NormalizeDouble(ask + Inp_Trail_Step * _Point, _Digits);
             new_sl = MathMin(trail_sl, NormalizeDouble(op, _Digits));
          }
          else
-         {
             new_sl = NormalizeDouble(op, _Digits);
-         }
 
-         // ขยับ SL ลงเท่านั้น ไม่เลยขึ้น
          if(sl == 0 || sl > new_sl + _Point * 0.5)
             trade.PositionModify(ticket, new_sl, tp);
       }
+   }
+}
+
+//--- AvgDown Group SL: คำนวณ SL จากราคาเฉลี่ยรวมทุกไม้ → ปิดพร้อมกัน
+void ManageGroupSL(bool is_buy, double bid, double ask, bool use_trail)
+{
+   ENUM_POSITION_TYPE side = is_buy ? POSITION_TYPE_BUY : POSITION_TYPE_SELL;
+   double total_vol = 0, total_cost = 0;
+   int count = 0;
+
+   for(int i = PositionsTotal()-1; i >= 0; i--)
+   {
+      ulong tk = PositionGetTicket(i);
+      if(!PositionSelectByTicket(tk)) continue;
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+      long mg = PositionGetInteger(POSITION_MAGIC);
+      if(mg != Inp_Magic && mg != Inp_Rescue_Magic) continue;
+      if(PositionGetInteger(POSITION_TYPE) != side) continue;
+      double v = PositionGetDouble(POSITION_VOLUME);
+      total_vol += v;
+      total_cost += PositionGetDouble(POSITION_PRICE_OPEN) * v;
+      count++;
+   }
+   if(count == 0 || total_vol <= 0) return;
+
+   double avg_price = NormalizeDouble(total_cost / total_vol, _Digits);
+   double profit_pts;
+   if(is_buy)
+      profit_pts = (bid - avg_price) / _Point;
+   else
+      profit_pts = (avg_price - ask) / _Point;
+
+   if(profit_pts < Inp_BE_Trigger) return;  // กำไรกลุ่มยังไม่ถึง trigger
+
+   double new_sl;
+   if(is_buy)
+   {
+      if(use_trail)
+         new_sl = MathMax(NormalizeDouble(bid - Inp_Trail_Step * _Point, _Digits),
+                          NormalizeDouble(avg_price, _Digits));
+      else
+         new_sl = NormalizeDouble(avg_price, _Digits);
+   }
+   else
+   {
+      if(use_trail)
+         new_sl = MathMin(NormalizeDouble(ask + Inp_Trail_Step * _Point, _Digits),
+                          NormalizeDouble(avg_price, _Digits));
+      else
+         new_sl = NormalizeDouble(avg_price, _Digits);
+   }
+
+   // อัปเดต SL ทุกไม้ในกลุ่มเป็นจุดเดียวกัน
+   for(int i = PositionsTotal()-1; i >= 0; i--)
+   {
+      ulong tk = PositionGetTicket(i);
+      if(!PositionSelectByTicket(tk)) continue;
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+      long mg = PositionGetInteger(POSITION_MAGIC);
+      if(mg != Inp_Magic && mg != Inp_Rescue_Magic) continue;
+      if(PositionGetInteger(POSITION_TYPE) != side) continue;
+
+      double sl = PositionGetDouble(POSITION_SL);
+      double tp = PositionGetDouble(POSITION_TP);
+
+      if(is_buy && sl < new_sl - _Point * 0.5)
+         trade.PositionModify(tk, new_sl, tp);
+      else if(!is_buy && (sl == 0 || sl > new_sl + _Point * 0.5))
+         trade.PositionModify(tk, new_sl, tp);
    }
 }
 
